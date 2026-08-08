@@ -1,29 +1,26 @@
+
 # ============================================================
 # OPTION FLOW SCANNER
 #
-# STEP 12 - TELEGRAM FINAL REPORTER
+# STEP 12 - TELEGRAM REPORTER
 #
 # IMPORTANT
 # ------------------------------------------------------------
-# STEP 1 ~ STEP 11 결과는 변경하지 않는다.
-# data/analysis/*.csv만 읽는다.
+# STEP 1 ~ STEP 11 결과를 변경하지 않는다.
+# data/analysis/*.csv 만 읽는다.
 #
-# GitHub Actions
-#     ↓
-# STEP 12
-#     ↓
-# CSV READ
-#     ↓
-# FINAL REPORT
-#     ↓
-# TELEGRAM
-#     ↓
-# EXIT
+# TELEGRAM ORDER
+# ------------------------------------------------------------
+# 1. 🔥🔥 FINAL TRADING LIST
+# 2. 🔥 CALL BUY + PUT SELL
+# 3. 🌎 MARKET REGIME
+# 4. 🎯 MARKET REGIME SCORE
+# 5. 🔥 UNUSUAL OPTION FLOW
+# 6. 🔥 TOP 20 OPTION SEARCH
+# 7. 🥇 TOP 종목 상세 분석
+# 8. ⚠️ DATA DISCLAIMER
+# 9. 🏁 SCAN COMPLETE
 #
-# NO getUpdates
-# NO /start
-# NO /scan
-# NO infinite loop
 # ============================================================
 
 import csv
@@ -60,7 +57,6 @@ TELEGRAM_CHAT_ID = os.environ.get(
     ""
 )
 
-# Telegram 안전 전송 길이
 TELEGRAM_LIMIT = 3900
 
 
@@ -142,7 +138,7 @@ def read_csv(path):
     if not os.path.exists(path):
 
         log(
-            "FILE NOT FOUND : "
+            "FILE NOT FOUND | "
             + os.path.relpath(
                 path,
                 BASE_DIR
@@ -164,21 +160,30 @@ def read_csv(path):
 
             rows = list(reader)
 
-        log(
-            "LOADED : "
-            + os.path.relpath(
-                path,
-                BASE_DIR
+            log(
+                "LOADED | "
+                + os.path.relpath(
+                    path,
+                    BASE_DIR
+                )
+                + f" | ROWS={len(rows):,}"
             )
-            + f" | ROWS={len(rows):,}"
-        )
 
-        return rows
+            if reader.fieldnames:
+
+                log(
+                    "COLUMNS | "
+                    + ", ".join(
+                        reader.fieldnames
+                    )
+                )
+
+            return rows
 
     except Exception as exc:
 
         log(
-            "CSV ERROR : "
+            "CSV READ ERROR | "
             + str(exc)
         )
 
@@ -186,7 +191,7 @@ def read_csv(path):
 
 
 # ============================================================
-# NORMALIZE
+# NORMALIZATION
 # ============================================================
 
 def normalize_key(value):
@@ -297,15 +302,21 @@ def fmt_money(value):
 
     if absolute >= 1_000_000_000:
 
-        return f"${number / 1_000_000_000:.2f}B"
+        return (
+            f"${number / 1_000_000_000:.2f}B"
+        )
 
     if absolute >= 1_000_000:
 
-        return f"${number / 1_000_000:.2f}M"
+        return (
+            f"${number / 1_000_000:.2f}M"
+        )
 
     if absolute >= 1_000:
 
-        return f"${number / 1_000:.1f}K"
+        return (
+            f"${number / 1_000:.1f}K"
+        )
 
     return f"${number:,.0f}"
 
@@ -318,7 +329,7 @@ def REAL(value):
 
     value = text_value(value)
 
-    return value if value else "N/A"
+    return value if value else "UNAVAILABLE"
 
 
 def CALCULATED(value):
@@ -326,7 +337,7 @@ def CALCULATED(value):
     value = text_value(value)
 
     if not value:
-        return "N/A"
+        return "UNAVAILABLE"
 
     return f"{value} [CALCULATED]"
 
@@ -336,14 +347,9 @@ def ESTIMATED(value):
     value = text_value(value)
 
     if not value:
-        return "N/A"
+        return "UNAVAILABLE"
 
     return f"{value} [ESTIMATED]"
-
-
-def UNAVAILABLE():
-
-    return "UNAVAILABLE"
 
 
 # ============================================================
@@ -363,6 +369,27 @@ def symbol_of(row):
 
 
 # ============================================================
+# RANK
+# ============================================================
+
+def rank_value(row):
+
+    value = get_value(
+        row,
+        "rank",
+        "final_rank",
+        "top_rank"
+    )
+
+    number = number_value(value)
+
+    if number is None:
+        return 999999
+
+    return number
+
+
+# ============================================================
 # SCORE
 # ============================================================
 
@@ -370,14 +397,12 @@ def score_of(row):
 
     value = get_value(
         row,
+        "top20_score",
         "score",
         "final_score",
         "decision_score",
         "flow_score",
-        "unusual_flow_score",
-        "option_search_score",
-        "structure_score",
-        default="0"
+        "max_flow_score"
     )
 
     number = number_value(value)
@@ -392,8 +417,10 @@ def sorted_rows(rows):
 
     return sorted(
         rows,
-        key=score_of,
-        reverse=True
+        key=lambda x: (
+            rank_value(x),
+            -score_of(x)
+        )
     )
 
 
@@ -416,6 +443,7 @@ def status_emoji(value):
             "진입"
         )
     ):
+
         return "🟢"
 
     if any(
@@ -427,6 +455,7 @@ def status_emoji(value):
             "관망"
         )
     ):
+
         return "🟡"
 
     if any(
@@ -438,6 +467,7 @@ def status_emoji(value):
             "회피"
         )
     ):
+
         return "🔴"
 
     return "⚪"
@@ -454,114 +484,235 @@ def find_symbol(rows, symbol):
     for row in rows:
 
         if symbol_of(row) == symbol:
+
             return row
 
     return None
 
 
 # ============================================================
-# 1. FINAL TRADING LIST
+# FIND TOP20 SYMBOLS
 # ============================================================
 
-def build_final_list(rows):
+def top_symbols(rows):
 
-    lines = [
-        "🔥🔥 FINAL TRADING LIST",
-        "━━━━━━━━━━━━━━━━━━━━━━",
-    ]
+    result = []
 
-    if not rows:
-
-        lines.append(
-            "⚪ FINAL REPORT : "
-            + UNAVAILABLE()
-        )
-
-        return lines
-
-    for index, row in enumerate(
-        sorted_rows(rows)[:20],
-        start=1
-    ):
+    for row in sorted_rows(rows):
 
         symbol = symbol_of(row)
 
         if not symbol:
             continue
 
-        decision = get_value(
-            row,
-            "decision",
-            "action",
-            "status",
-            "signal"
+        if symbol not in result:
+
+            result.append(symbol)
+
+    return result[:20]
+
+
+# ============================================================
+# MARKET REGIME
+# ============================================================
+
+def build_market_regime(rows):
+
+    lines = [
+        "━━━━━━━━━━━━━━━━━━━━━━",
+        "🌎 MARKET REGIME",
+        "━━━━━━━━━━━━━━━━━━━━━━",
+    ]
+
+    if not rows:
+
+        lines.append(
+            "⚪ MARKET REGIME : UNAVAILABLE"
         )
 
-        score = get_value(
-            row,
-            "score",
-            "final_score",
-            "decision_score",
-            "structure_score"
+        return lines
+
+    row = rows[0]
+
+    regime = get_value(
+        row,
+        "regime",
+        "market_regime"
+    )
+
+    market_score = get_value(
+        row,
+        "market_score",
+        "score",
+        "overall_score"
+    )
+
+    timestamp = get_value(
+        row,
+        "timestamp_utc",
+        "timestamp"
+    )
+
+    if regime:
+
+        lines.append(
+            f"Market Regime : {regime}"
         )
 
-        reason = get_value(
-            row,
-            "reason",
-            "reasons",
-            "summary"
+    if market_score:
+
+        lines.append(
+            f"Market Score  : {fmt_number(market_score)}/100"
         )
 
-        if index == 1:
-            rank = "🥇"
-        elif index == 2:
-            rank = "🥈"
-        elif index == 3:
-            rank = "🥉"
-        else:
-            rank = f"{index}️⃣"
+    if timestamp:
+
+        lines.append(
+            f"Timestamp     : {timestamp}"
+        )
+
+    lines.append("")
+
+    indexes = [
+        ("NDX", "ndx_price", "ndx_direction"),
+        ("SPY", "spy_price", "spy_direction"),
+        ("SOXX", "soxx_price", "soxx_direction"),
+        ("DIA", "dia_price", "dia_direction"),
+    ]
+
+    for name, price_key, direction_key in indexes:
+
+        price = get_value(
+            row,
+            price_key
+        )
+
+        direction = get_value(
+            row,
+            direction_key
+        )
+
+        lines.append(
+            f"📊 {name}"
+        )
+
+        if price:
+
+            lines.append(
+                f"Price     {REAL(price)}"
+            )
+
+        if direction:
+
+            lines.append(
+                f"Direction {status_emoji(direction)} {direction}"
+            )
 
         lines.append("")
-        lines.append(
-            f"{rank} {symbol}"
-        )
-
-        lines.append(
-            f"{status_emoji(decision)} "
-            f"{decision or 'UNAVAILABLE'}"
-        )
-
-        if score:
-
-            lines.append(
-                f"Score {score} [CALCULATED]"
-            )
-
-        if reason:
-
-            lines.append(
-                "📌 확인된 조건"
-            )
-
-            for part in reason.split("|"):
-
-                part = part.strip()
-
-                if part:
-                    lines.append(
-                        f"• {part}"
-                    )
 
     return lines
 
 
 # ============================================================
-# 2. CALL BUY + PUT SELL
+# MARKET SCORE
+# ============================================================
+
+def build_market_score(rows):
+
+    lines = [
+        "━━━━━━━━━━━━━━━━━━━━━━",
+        "🎯 MARKET REGIME SCORE",
+        "━━━━━━━━━━━━━━━━━━━━━━",
+    ]
+
+    if not rows:
+
+        lines.append(
+            "⚪ UNAVAILABLE"
+        )
+
+        return lines
+
+    row = rows[0]
+
+    score = get_value(
+        row,
+        "market_score",
+        "score",
+        "overall_score",
+        "total_score"
+    )
+
+    regime = get_value(
+        row,
+        "regime",
+        "market_regime",
+        "overall_regime"
+    )
+
+    if score:
+
+        lines.append(
+            f"🔥 OVERALL {fmt_number(score)}/100"
+        )
+
+    if regime:
+
+        lines.append(
+            f"{status_emoji(regime)} {regime}"
+        )
+
+    lines.append("")
+
+    directions = [
+        ("NDX", "ndx_direction"),
+        ("SPY", "spy_direction"),
+        ("SOXX", "soxx_direction"),
+        ("DIA", "dia_direction"),
+    ]
+
+    bull = 0
+    bear = 0
+
+    for name, key in directions:
+
+        value = get_value(
+            row,
+            key
+        )
+
+        if value:
+
+            if "BULL" in value.upper():
+                bull += 1
+
+            if "BEAR" in value.upper():
+                bear += 1
+
+            lines.append(
+                f"{name:<6} "
+                f"{status_emoji(value)} "
+                f"{value}"
+            )
+
+    lines.append("")
+
+    lines.append(
+        f"Index Alignment "
+        f"BULL {bull} / BEAR {bear}"
+    )
+
+    return lines
+
+
+# ============================================================
+# CALL BUY + PUT SELL
 # ============================================================
 
 def build_special(rows):
 
     lines = [
+        "━━━━━━━━━━━━━━━━━━━━━━",
         "🔥 CALL BUY + PUT SELL",
         "━━━━━━━━━━━━━━━━━━━━━━",
     ]
@@ -584,257 +735,241 @@ def build_special(rows):
         if not symbol:
             continue
 
-        call = get_value(
+        call_strike = get_value(
             row,
-            "call",
-            "call_contract",
-            "call_symbol",
+            "rr_call_strike",
             "call_strike"
-        )
-
-        put = get_value(
-            row,
-            "put",
-            "put_contract",
-            "put_symbol",
-            "put_strike"
         )
 
         call_dte = get_value(
             row,
-            "call_dte",
-            "dte"
-        )
-
-        put_dte = get_value(
-            row,
-            "put_dte",
-            "dte"
+            "rr_call_dte",
+            "call_dte"
         )
 
         call_premium = get_value(
             row,
-            "call_premium",
-            "call_premium_flow"
+            "rr_call_premium",
+            "call_premium"
+        )
+
+        put_strike = get_value(
+            row,
+            "rr_put_strike",
+            "put_strike"
+        )
+
+        put_dte = get_value(
+            row,
+            "rr_put_dte",
+            "put_dte"
         )
 
         put_premium = get_value(
             row,
-            "put_premium",
-            "put_premium_flow"
+            "rr_put_premium",
+            "put_premium"
         )
 
-        strength = get_value(
+        rr_score = get_value(
             row,
-            "strength",
-            "score",
-            "structure_score"
+            "rr_score"
         )
 
         lines.append("")
+
         lines.append(
             f"{index}. {symbol}"
         )
 
-        if strength:
+        if rr_score:
 
             lines.append(
-                f"Strength : {strength} [CALCULATED]"
+                f"RR Score {fmt_number(rr_score)}"
             )
 
-        lines.append("")
         lines.append(
-            "CALL BUY EST. 🟢"
+            "   CALL BUY EST. 🟢"
         )
 
-        if call:
-            lines.append(call)
+        if call_strike:
+
+            lines.append(
+                f"   Strike {call_strike}"
+            )
 
         if call_dte:
+
             lines.append(
-                f"DTE {call_dte}"
+                f"   DTE {call_dte}"
             )
 
         if call_premium:
 
             lines.append(
-                "Premium Flow "
+                "   Premium "
                 + fmt_money(call_premium)
                 + " [CALCULATED]"
             )
 
-        lines.append("")
         lines.append(
-            "PUT SELL EST. 🔴"
+            "   PUT SELL EST. 🔴"
         )
 
-        if put:
-            lines.append(put)
+        if put_strike:
+
+            lines.append(
+                f"   Strike {put_strike}"
+            )
 
         if put_dte:
+
             lines.append(
-                f"DTE {put_dte}"
+                f"   DTE {put_dte}"
             )
 
         if put_premium:
 
             lines.append(
-                "Premium Flow "
+                "   Premium "
                 + fmt_money(put_premium)
                 + " [CALCULATED]"
             )
 
-        lines.append("")
         lines.append(
-            "Structure"
-        )
-
-        lines.append(
-            "🔥 BULLISH RISK-REVERSAL"
+            "   🔥 BULLISH RISK-REVERSAL"
         )
 
     return lines
 
 
 # ============================================================
-# 3. MARKET REGIME
+# FINAL TRADING LIST
 # ============================================================
 
-def build_market_regime(rows):
+def build_final_list(
+    final_rows,
+    decision_rows,
+    top20_rows
+):
 
     lines = [
-        "🌎 MARKET REGIME",
+        "━━━━━━━━━━━━━━━━━━━━━━",
+        "🔥🔥 FINAL TRADING LIST",
         "━━━━━━━━━━━━━━━━━━━━━━",
     ]
 
-    preferred = [
-        "NDX",
-        "SPY",
-        "SOXX",
-        "DIA"
-    ]
+    source = final_rows
 
-    ordered = []
+    if not source:
 
-    used = set()
+        source = decision_rows
 
-    for ticker in preferred:
+    if not source:
 
-        for row in rows:
+        source = top20_rows
 
-            if symbol_of(row) == ticker:
+    if not source:
 
-                ordered.append(row)
-                used.add(id(row))
-                break
+        lines.append(
+            "⚪ FINAL REPORT : UNAVAILABLE"
+        )
 
-    for row in rows:
+        return lines
 
-        if id(row) not in used:
+    ordered = sorted_rows(source)
 
-            ordered.append(row)
-
-    for row in ordered:
+    for index, row in enumerate(
+        ordered[:20],
+        start=1
+    ):
 
         symbol = symbol_of(row)
 
         if not symbol:
             continue
 
-        price = get_value(
+        decision = get_value(
             row,
-            "current_price",
-            "price",
-            "close"
+            "decision",
+            "action",
+            "status",
+            "signal"
         )
 
-        change = get_value(
+        score = get_value(
             row,
-            "change_percent",
-            "percent_change",
-            "change_pct"
+            "decision_score",
+            "final_score",
+            "top20_score",
+            "score"
         )
 
-        trend = get_value(
+        reason = get_value(
             row,
-            "trend",
-            "regime",
-            "direction"
-        )
-
-        momentum = get_value(
-            row,
-            "momentum"
-        )
-
-        rsi = get_value(
-            row,
-            "rsi"
-        )
-
-        support = get_value(
-            row,
-            "support",
-            "support_level"
-        )
-
-        resistance = get_value(
-            row,
-            "resistance",
-            "resistance_level"
+            "decision_reason",
+            "reason",
+            "selection_reason",
+            "summary"
         )
 
         lines.append("")
+
+        if index == 1:
+            rank = "🥇"
+        elif index == 2:
+            rank = "🥈"
+        elif index == 3:
+            rank = "🥉"
+        else:
+            rank = f"{index}️⃣"
+
         lines.append(
-            f"📊 {symbol}"
+            f"{rank} {symbol}"
         )
 
-        if price:
+        if decision:
+
             lines.append(
-                f"현재가 {REAL(price)}"
+                f"{status_emoji(decision)} "
+                f"{decision}"
             )
 
-        if change:
+        if score:
+
             lines.append(
-                f"등락 {REAL(change)}"
+                f"Score {fmt_number(score)} "
+                f"[CALCULATED]"
             )
 
-        if trend:
+        if reason:
+
             lines.append(
-                f"Trend       {REAL(trend)}"
+                "📌 확인된 조건"
             )
 
-        if momentum:
-            lines.append(
-                f"Momentum    {REAL(momentum)}"
-            )
+            for part in reason.split("|"):
 
-        if rsi:
-            lines.append(
-                f"RSI         {REAL(rsi)}"
-            )
+                part = part.strip()
 
-        if support:
-            lines.append(
-                f"Support     {CALCULATED(support)}"
-            )
+                if part:
 
-        if resistance:
-            lines.append(
-                f"Resistance  {CALCULATED(resistance)}"
-            )
+                    lines.append(
+                        f"• {part}"
+                    )
 
     return lines
 
 
 # ============================================================
-# 4. MARKET REGIME SCORE
+# TOP 20
 # ============================================================
 
-def build_market_score(rows):
+def build_top20(rows):
 
     lines = [
-        "🎯 MARKET REGIME SCORE",
+        "━━━━━━━━━━━━━━━━━━━━━━",
+        "🔥 TOP 20 OPTION SEARCH",
         "━━━━━━━━━━━━━━━━━━━━━━",
     ]
 
@@ -846,116 +981,10 @@ def build_market_score(rows):
 
         return lines
 
-    for row in rows:
-
-        symbol = symbol_of(row)
-
-        score = get_value(
-            row,
-            "score",
-            "regime_score",
-            "market_score"
-        )
-
-        trend = get_value(
-            row,
-            "trend",
-            "regime"
-        )
-
-        if not symbol or not score:
-            continue
-
-        lines.append(
-            f"{symbol:<8} "
-            f"{score}/100 "
-            f"{status_emoji(trend)}"
-        )
-
-    overall_score = ""
-
-    overall_regime = ""
-
-    for row in rows:
-
-        if not overall_score:
-
-            overall_score = get_value(
-                row,
-                "overall_score",
-                "total_score"
-            )
-
-        if not overall_regime:
-
-            overall_regime = get_value(
-                row,
-                "overall_regime",
-                "market_regime"
-            )
-
-    if overall_score:
-
-        lines.append("")
-        lines.append("OVERALL")
-        lines.append(
-            f"🔥 {overall_score}/100"
-        )
-
-    if overall_regime:
-
-        lines.append(
-            f"{status_emoji(overall_regime)} "
-            f"{overall_regime}"
-        )
-
-    return lines
-
-
-# ============================================================
-# 5. UNUSUAL OPTION FLOW
-# ============================================================
-
-def build_unusual_flow(rows):
-
-    lines = [
-        "🔥 UNUSUAL OPTION FLOW",
-        "━━━━━━━━━━━━━━━━━━━━━━",
-    ]
-
-    symbols = set()
-
-    for row in rows:
-
-        symbol = symbol_of(row)
-
-        if symbol:
-            symbols.add(symbol)
-
-    lines.append(
-        f"전체 분석 종목       {len(symbols):,}"
-    )
-
-    lines.append(
-        f"옵션 Flow 분석       {len(rows):,}"
-    )
-
-    lines.append(
-        "DTE                   0~180 ALL"
-    )
-
-    lines.append(
-        "CALL / PUT            ALL"
-    )
-
-    lines.append("")
-
-    lines.append(
-        "오늘 비정상 Flow TOP"
-    )
+    ordered = sorted_rows(rows)
 
     for index, row in enumerate(
-        sorted_rows(rows)[:20],
+        ordered[:20],
         start=1
     ):
 
@@ -964,11 +993,156 @@ def build_unusual_flow(rows):
         if not symbol:
             continue
 
+        top_score = get_value(
+            row,
+            "top20_score"
+        )
+
+        flow_score = get_value(
+            row,
+            "max_flow_score",
+            "flow_score"
+        )
+
+        dte = get_value(
+            row,
+            "top_dte",
+            "top_dte_min",
+            "dte_min"
+        )
+
+        direction = get_value(
+            row,
+            "estimated_direction",
+            "direction"
+        )
+
+        lines.append("")
+
+        if index == 1:
+            rank = "🥇"
+        elif index == 2:
+            rank = "🥈"
+        elif index == 3:
+            rank = "🥉"
+        else:
+            rank = f"{index}."
+
+        lines.append(
+            f"{rank} {symbol}"
+        )
+
+        if top_score:
+
+            lines.append(
+                f"TOP20 Score {fmt_number(top_score)}"
+            )
+
+        if flow_score:
+
+            lines.append(
+                f"Flow Score {fmt_number(flow_score)}"
+            )
+
+        if dte:
+
+            lines.append(
+                f"DTE {dte}"
+            )
+
+        if direction:
+
+            lines.append(
+                f"Direction {direction}"
+            )
+
+    return lines
+
+
+# ============================================================
+# UNUSUAL FLOW
+# ============================================================
+
+def build_unusual_flow(
+    unusual_rows,
+    top20_rows
+):
+
+    lines = [
+        "━━━━━━━━━━━━━━━━━━━━━━",
+        "🔥 UNUSUAL OPTION FLOW",
+        "━━━━━━━━━━━━━━━━━━━━━━",
+    ]
+
+    if not unusual_rows:
+
+        lines.append(
+            "⚪ UNUSUAL FLOW FILE : UNAVAILABLE"
+        )
+
+        return lines
+
+    symbols = set()
+
+    for row in unusual_rows:
+
+        symbol = symbol_of(row)
+
+        if symbol:
+
+            symbols.add(symbol)
+
+    lines.append(
+        f"전체 분석 종목 {len(symbols):,}"
+    )
+
+    lines.append(
+        f"옵션 Flow 분석 {len(unusual_rows):,}"
+    )
+
+    lines.append("")
+
+    lines.append(
+        "오늘 비정상 Flow TOP"
+    )
+
+    # 종목별 최고 score만 표시
+    best = {}
+
+    for row in unusual_rows:
+
+        symbol = symbol_of(row)
+
+        if not symbol:
+            continue
+
+        score = score_of(row)
+
+        if (
+            symbol not in best
+            or score > score_of(best[symbol])
+        ):
+
+            best[symbol] = row
+
+    ordered = sorted(
+        best.values(),
+        key=score_of,
+        reverse=True
+    )
+
+    for index, row in enumerate(
+        ordered[:20],
+        start=1
+    ):
+
+        symbol = symbol_of(row)
+
         score = get_value(
             row,
-            "score",
             "unusual_flow_score",
-            "flow_score"
+            "flow_score",
+            "score"
         )
 
         if index == 1:
@@ -982,816 +1156,792 @@ def build_unusual_flow(rows):
 
         lines.append(
             f"{rank} {symbol:<8} "
-            f"{score or 'N/A'}"
+            f"{fmt_number(score)}"
         )
 
     return lines
 
 
 # ============================================================
-# 6. TOP 20 OPTION SEARCH
-# ============================================================
-
-def build_top20(rows):
-
-    lines = [
-        "🔥 TOP 20 OPTION SEARCH",
-        "━━━━━━━━━━━━━━━━━━━━━━",
-    ]
-
-    if not rows:
-
-        lines.append(
-            "⚪ UNAVAILABLE"
-        )
-
-        return lines
-
-    for index, row in enumerate(
-        sorted_rows(rows)[:20],
-        start=1
-    ):
-
-        symbol = symbol_of(row)
-
-        if not symbol:
-            continue
-
-        score = get_value(
-            row,
-            "score",
-            "option_search_score",
-            "flow_score",
-            "unusual_flow_score"
-        )
-
-        decision = get_value(
-            row,
-            "decision",
-            "action",
-            "status",
-            "signal"
-        )
-
-        lines.append(
-            f"{index}. {symbol} "
-            f"{status_emoji(decision)} "
-            f"Score {score or 'N/A'}"
-        )
-
-    return lines
-
-
-# ============================================================
-# 7. TOP STOCK DETAIL
+# TOP DETAIL
 # ============================================================
 
 def build_top_detail(
     top20_rows,
-    option_rows,
-    greek_rows,
-    structure_rows,
-    decision_rows
+    decision_rows,
+    option_rows
 ):
 
     lines = [
+        "━━━━━━━━━━━━━━━━━━━━━━",
         "🥇 TOP 종목 상세 분석",
         "━━━━━━━━━━━━━━━━━━━━━━",
     ]
 
-    top = sorted_rows(top20_rows)
+    symbols = top_symbols(top20_rows)
 
-    if not top:
+    if not symbols:
+
+        symbols = [
+            symbol_of(row)
+            for row in sorted_rows(
+                decision_rows
+            )[:20]
+            if symbol_of(row)
+        ]
+
+    if not symbols:
 
         lines.append(
-            "⚪ TOP20 : "
-            + UNAVAILABLE()
+            "⚪ TOP20 : UNAVAILABLE"
         )
 
         return lines
 
-    base = top[0]
+    # TOP 20 전체 출력
+    for position, symbol in enumerate(
+        symbols[:20],
+        start=1
+    ):
 
-    symbol = symbol_of(base)
-
-    if not symbol:
-        return lines
-
-    current_price = get_value(
-        base,
-        "current_price",
-        "price"
-    )
-
-    score = get_value(
-        base,
-        "score",
-        "option_search_score",
-        "flow_score",
-        "unusual_flow_score"
-    )
-
-    lines.append(
-        f"🥇 {symbol}"
-    )
-
-    if current_price:
-
-        lines.append(
-            f"현재가 {REAL(current_price)}"
+        top = find_symbol(
+            top20_rows,
+            symbol
         )
 
-    if score:
-
-        lines.append(
-            f"UNUSUAL FLOW SCORE {score}"
+        decision = find_symbol(
+            decision_rows,
+            symbol
         )
 
-    # --------------------------------------------------------
-    # 선정 이유
-    # --------------------------------------------------------
+        option = find_symbol(
+            option_rows,
+            symbol
+        )
 
-    lines.append("")
-    lines.append(
-        "📌 TOP20 선정 이유"
-    )
+        lines.append("")
 
-    reason = get_value(
-        base,
-        "reason",
-        "reasons",
-        "selection_reason"
-    )
+        if position == 1:
+            medal = "🥇"
+        elif position == 2:
+            medal = "🥈"
+        elif position == 3:
+            medal = "🥉"
+        else:
+            medal = f"{position}."
 
-    if reason:
+        lines.append(
+            f"{medal} {symbol}"
+        )
 
-        for part in reason.split("|"):
+        # ----------------------------------------------------
+        # 선정 이유
+        # ----------------------------------------------------
 
-            part = part.strip()
+        lines.append("")
+        lines.append(
+            "📌 선정 이유"
+        )
 
-            if part:
+        reason = ""
+
+        if top:
+
+            reason = get_value(
+                top,
+                "selection_reason",
+                "reason"
+            )
+
+        if not reason and decision:
+
+            reason = get_value(
+                decision,
+                "decision_reason",
+                "reason"
+            )
+
+        if reason:
+
+            for part in reason.split("|"):
+
+                part = part.strip()
+
+                if part:
+
+                    lines.append(
+                        f"• {part}"
+                    )
+
+        else:
+
+            lines.append(
+                "⚪ UNAVAILABLE"
+            )
+
+        # ----------------------------------------------------
+        # MARKET ALIGNMENT
+        # ----------------------------------------------------
+
+        lines.append("")
+        lines.append(
+            "🌎 MARKET ALIGNMENT"
+        )
+
+        if decision:
+
+            market_regime = get_value(
+                decision,
+                "market_regime",
+                "regime"
+            )
+
+            ndx = get_value(
+                decision,
+                "ndx_direction"
+            )
+
+            spy = get_value(
+                decision,
+                "spy_direction"
+            )
+
+            soxx = get_value(
+                decision,
+                "soxx_direction"
+            )
+
+            dia = get_value(
+                decision,
+                "dia_direction"
+            )
+
+            if market_regime:
+
                 lines.append(
-                    f"• {part}"
+                    f"Market Regime : {market_regime}"
                 )
 
-    else:
+            if ndx:
 
-        lines.append(
-            "⚪ 선정 이유 : "
-            + UNAVAILABLE()
-        )
+                lines.append(
+                    f"NDX  : {status_emoji(ndx)} {ndx}"
+                )
 
-    # --------------------------------------------------------
-    # MARKET ALIGNMENT
-    # --------------------------------------------------------
+            if spy:
 
-    lines.append("")
-    lines.append(
-        "🌎 MARKET ALIGNMENT"
-    )
+                lines.append(
+                    f"SPY  : {status_emoji(spy)} {spy}"
+                )
 
-    alignment = get_value(
-        base,
-        "market_alignment",
-        "alignment"
-    )
+            if soxx:
 
-    if alignment:
+                lines.append(
+                    f"SOXX : {status_emoji(soxx)} {soxx}"
+                )
 
-        lines.append(alignment)
+            if dia:
 
-    else:
+                lines.append(
+                    f"DIA  : {status_emoji(dia)} {dia}"
+                )
 
-        lines.append(
-            "⚪ MARKET ALIGNMENT : "
-            + UNAVAILABLE()
-        )
+            bull = 0
+            bear = 0
 
-    # --------------------------------------------------------
-    # OPTION STRUCTURE
-    # --------------------------------------------------------
+            for value in (
+                ndx,
+                spy,
+                soxx,
+                dia
+            ):
 
-    lines.append("")
-    lines.append(
-        "🎯 OPTION STRUCTURE"
-    )
-    lines.append(
-        "━━━━━━━━━━━━━━━━━━━━━━"
-    )
+                if "BULL" in value.upper():
+                    bull += 1
 
-    structure = find_symbol(
-        structure_rows,
-        symbol
-    )
-
-    if structure:
-
-        call_wall = get_value(
-            structure,
-            "call_wall"
-        )
-
-        put_wall = get_value(
-            structure,
-            "put_wall"
-        )
-
-        support = get_value(
-            structure,
-            "support",
-            "support_level"
-        )
-
-        resistance = get_value(
-            structure,
-            "resistance",
-            "resistance_level"
-        )
-
-        if call_wall:
-            lines.append(
-                f"CALL WALL "
-                f"{CALCULATED(call_wall)}"
-            )
-
-        if put_wall:
-            lines.append(
-                f"PUT WALL "
-                f"{CALCULATED(put_wall)}"
-            )
-
-        if support:
-            lines.append(
-                f"주요 지지 "
-                f"{CALCULATED(support)}"
-            )
-
-        if resistance:
-            lines.append(
-                f"주요 저항 "
-                f"{CALCULATED(resistance)}"
-            )
-
-    else:
-
-        lines.append(
-            "⚪ STRUCTURE : "
-            + UNAVAILABLE()
-        )
-
-    # --------------------------------------------------------
-    # GREEKS
-    # --------------------------------------------------------
-
-    lines.append("")
-    lines.append(
-        "📊 GREEKS / EXPOSURE"
-    )
-
-    greek = find_symbol(
-        greek_rows,
-        symbol
-    )
-
-    if greek:
-
-        iv = get_value(
-            greek,
-            "implied_volatility",
-            "impliedVolatility",
-            "iv"
-        )
-
-        delta = get_value(
-            greek,
-            "delta"
-        )
-
-        gamma = get_value(
-            greek,
-            "gamma"
-        )
-
-        vanna = get_value(
-            greek,
-            "vanna"
-        )
-
-        charm = get_value(
-            greek,
-            "charm"
-        )
-
-        gex = get_value(
-            greek,
-            "gex"
-        )
-
-        if iv:
-            lines.append(
-                f"IV          {REAL(iv)} [REAL]"
-            )
-
-        if delta:
-            lines.append(
-                f"Delta       {REAL(delta)} [REAL]"
-            )
-
-        if gamma:
-            lines.append(
-                f"Gamma       {CALCULATED(gamma)}"
-            )
-
-        if vanna:
-            lines.append(
-                f"Vanna       {CALCULATED(vanna)}"
-            )
-
-        if charm:
-            lines.append(
-                f"Charm       {CALCULATED(charm)}"
-            )
-
-        if gex:
-            lines.append(
-                f"GEX         {CALCULATED(gex)}"
-            )
-
-    else:
-
-        lines.append(
-            "Greeks : "
-            + UNAVAILABLE()
-        )
-
-    lines.append(
-        "HIRO        UNAVAILABLE"
-    )
-
-    # --------------------------------------------------------
-    # CALL FLOW
-    # --------------------------------------------------------
-
-    lines.append("")
-    lines.append(
-        "🟢 TOP CALL FLOW"
-    )
-
-    calls = []
-
-    for row in option_rows:
-
-        if symbol_of(row) != symbol:
-            continue
-
-        option_type = get_value(
-            row,
-            "option_type",
-            "type",
-            "contract_type"
-        ).upper()
-
-        if option_type == "CALL":
-
-            calls.append(row)
-
-    for call in sorted_rows(calls)[:2]:
-
-        strike = get_value(
-            call,
-            "strike"
-        )
-
-        dte = get_value(
-            call,
-            "dte"
-        )
-
-        volume = get_value(
-            call,
-            "volume"
-        )
-
-        oi = get_value(
-            call,
-            "open_interest",
-            "openInterest",
-            "oi"
-        )
-
-        iv = get_value(
-            call,
-            "implied_volatility",
-            "impliedVolatility",
-            "iv"
-        )
-
-        delta = get_value(
-            call,
-            "delta"
-        )
-
-        gamma = get_value(
-            call,
-            "gamma"
-        )
-
-        premium = get_value(
-            call,
-            "premium_flow",
-            "premium"
-        )
-
-        lines.append("")
-        lines.append(
-            f"💚 ${strike or 'N/A'}C | "
-            f"DTE {dte or 'N/A'}"
-        )
-
-        lines.append(
-            "Vol "
-            + fmt_number(volume)
-            + " | OI "
-            + fmt_number(oi)
-        )
-
-        if iv:
-            lines.append(
-                f"IV {REAL(iv)} [REAL]"
-            )
-
-        if delta:
-            lines.append(
-                f"Delta {REAL(delta)} [REAL]"
-            )
-
-        if gamma:
-            lines.append(
-                f"Gamma {CALCULATED(gamma)}"
-            )
-
-        if premium:
-            lines.append(
-                "Premium Flow "
-                + fmt_money(premium)
-                + " [CALCULATED]"
-            )
-
-        lines.append(
-            "BUY EST. 🟢 [ESTIMATED]"
-        )
-
-        lines.append(
-            "OPEN EST. 🟢 [ESTIMATED]"
-        )
-
-    # --------------------------------------------------------
-    # PUT FLOW
-    # --------------------------------------------------------
-
-    lines.append("")
-    lines.append(
-        "🔴 TOP PUT FLOW"
-    )
-
-    puts = []
-
-    for row in option_rows:
-
-        if symbol_of(row) != symbol:
-            continue
-
-        option_type = get_value(
-            row,
-            "option_type",
-            "type",
-            "contract_type"
-        ).upper()
-
-        if option_type == "PUT":
-
-            puts.append(row)
-
-    for put in sorted_rows(puts)[:2]:
-
-        strike = get_value(
-            put,
-            "strike"
-        )
-
-        dte = get_value(
-            put,
-            "dte"
-        )
-
-        volume = get_value(
-            put,
-            "volume"
-        )
-
-        oi = get_value(
-            put,
-            "open_interest",
-            "openInterest",
-            "oi"
-        )
-
-        iv = get_value(
-            put,
-            "implied_volatility",
-            "impliedVolatility",
-            "iv"
-        )
-
-        delta = get_value(
-            put,
-            "delta"
-        )
-
-        gamma = get_value(
-            put,
-            "gamma"
-        )
-
-        premium = get_value(
-            put,
-            "premium_flow",
-            "premium"
-        )
-
-        lines.append("")
-        lines.append(
-            f"❤️ ${strike or 'N/A'}P | "
-            f"DTE {dte or 'N/A'}"
-        )
-
-        lines.append(
-            "Vol "
-            + fmt_number(volume)
-            + " | OI "
-            + fmt_number(oi)
-        )
-
-        if iv:
-            lines.append(
-                f"IV {REAL(iv)} [REAL]"
-            )
-
-        if delta:
-            lines.append(
-                f"Delta {REAL(delta)} [REAL]"
-            )
-
-        if gamma:
-            lines.append(
-                f"Gamma {CALCULATED(gamma)}"
-            )
-
-        if premium:
-            lines.append(
-                "Premium Flow "
-                + fmt_money(premium)
-                + " [CALCULATED]"
-            )
-
-        lines.append(
-            "SELL EST. 🔴 [ESTIMATED]"
-        )
-
-        lines.append(
-            "OPEN EST. 🟢 [ESTIMATED]"
-        )
-
-    # --------------------------------------------------------
-    # RISK REVERSAL
-    # --------------------------------------------------------
-
-    lines.append("")
-    lines.append(
-        "🔥 RISK-REVERSAL"
-    )
-
-    special = find_symbol(
-        decision_rows,
-        symbol
-    )
-
-    if special:
-
-        structure_text = get_value(
-            special,
-            "structure",
-            "special_structure",
-            "signal"
-        )
-
-        if structure_text:
+                if "BEAR" in value.upper():
+                    bear += 1
 
             lines.append(
-                structure_text
+                f"Index Alignment "
+                f"BULL {bull} / BEAR {bear}"
             )
 
         else:
 
             lines.append(
-                "CALL BUY EST. + PUT SELL EST."
+                "⚪ UNAVAILABLE"
             )
 
-    else:
+        # ----------------------------------------------------
+        # CURRENT PRICE
+        # ----------------------------------------------------
 
-        lines.append(
-            "CALL BUY EST. + PUT SELL EST."
-        )
+        current_price = ""
 
-    lines.append(
-        "※ BUY / SELL 방향은 ESTIMATED"
-    )
+        if decision:
 
-    # --------------------------------------------------------
-    # SUPPORT / RESISTANCE
-    # --------------------------------------------------------
+            current_price = get_value(
+                decision,
+                "current_price",
+                "price"
+            )
 
-    lines.append("")
-    lines.append(
-        "🧭 SUPPORT / RESISTANCE"
-    )
+        if not current_price and option:
 
-    structure = find_symbol(
-        structure_rows,
-        symbol
-    )
-
-    if structure:
-
-        support = get_value(
-            structure,
-            "support",
-            "support_level"
-        )
-
-        resistance = get_value(
-            structure,
-            "resistance",
-            "resistance_level"
-        )
+            current_price = get_value(
+                option,
+                "current_price",
+                "price"
+            )
 
         if current_price:
 
+            lines.append("")
             lines.append(
                 f"현재가 {REAL(current_price)}"
             )
 
-        if support:
+        # ----------------------------------------------------
+        # OPTION STRUCTURE
+        # ----------------------------------------------------
 
-            lines.append(
-                f"🟢 주요 지지 "
-                f"{CALCULATED(support)}"
-            )
-
-        if resistance:
-
-            lines.append(
-                f"🔴 주요 저항 "
-                f"{CALCULATED(resistance)}"
-            )
-
-    else:
-
+        lines.append("")
         lines.append(
-            "⚪ "
-            + UNAVAILABLE()
+            "🎯 OPTION STRUCTURE"
         )
 
-    # --------------------------------------------------------
-    # SUMMARY
-    # --------------------------------------------------------
+        source = option or decision
 
-    lines.append("")
-    lines.append(
-        "🧠 종합 판단"
-    )
-    lines.append(
-        "━━━━━━━━━━━━━━━━━━━━━━"
-    )
+        if source:
 
-    decision = find_symbol(
-        decision_rows,
-        symbol
-    )
+            structure = get_value(
+                source,
+                "structure",
+                "structure_bias"
+            )
 
-    if decision:
+            call_wall = get_value(
+                source,
+                "call_wall"
+            )
 
-        summary = get_value(
-            decision,
-            "summary",
-            "analysis",
-            "comment",
-            "reason"
+            put_wall = get_value(
+                source,
+                "put_wall"
+            )
+
+            support = get_value(
+                source,
+                "support"
+            )
+
+            resistance = get_value(
+                source,
+                "resistance"
+            )
+
+            if structure:
+
+                lines.append(
+                    f"Structure : {structure}"
+                )
+
+            if call_wall:
+
+                lines.append(
+                    f"CALL WALL : "
+                    f"{CALCULATED(call_wall)}"
+                )
+
+            if put_wall:
+
+                lines.append(
+                    f"PUT WALL  : "
+                    f"{CALCULATED(put_wall)}"
+                )
+
+            if support:
+
+                lines.append(
+                    f"Support   : "
+                    f"{CALCULATED(support)}"
+                )
+
+            if resistance:
+
+                lines.append(
+                    f"Resistance: "
+                    f"{CALCULATED(resistance)}"
+                )
+
+        else:
+
+            lines.append(
+                "⚪ UNAVAILABLE"
+            )
+
+        # ----------------------------------------------------
+        # GEX
+        # ----------------------------------------------------
+
+        lines.append("")
+        lines.append(
+            "📊 GREEKS / EXPOSURE"
         )
 
-        if summary:
+        if option:
 
-            for part in summary.split("|"):
+            total_gex = get_value(
+                option,
+                "total_gex",
+                "net_gex",
+                "gex"
+            )
 
-                part = part.strip()
+            if total_gex:
 
-                if part:
-                    lines.append(part)
+                lines.append(
+                    f"NET GEX : "
+                    f"{CALCULATED(total_gex)}"
+                )
 
-        decision_value = get_value(
-            decision,
-            "decision",
-            "action",
-            "status",
-            "signal"
+        if decision:
+
+            call_gex = get_value(
+                decision,
+                "call_gex"
+            )
+
+            put_gex = get_value(
+                decision,
+                "put_gex"
+            )
+
+            net_gex = get_value(
+                decision,
+                "net_gex",
+                "total_gex"
+            )
+
+            if call_gex:
+
+                lines.append(
+                    f"CALL GEX : "
+                    f"{CALCULATED(call_gex)}"
+                )
+
+            if put_gex:
+
+                lines.append(
+                    f"PUT GEX  : "
+                    f"{CALCULATED(put_gex)}"
+                )
+
+            if net_gex:
+
+                lines.append(
+                    f"NET GEX  : "
+                    f"{CALCULATED(net_gex)}"
+                )
+
+        # ----------------------------------------------------
+        # CALL FLOW
+        # ----------------------------------------------------
+
+        lines.append("")
+        lines.append(
+            "🟢 TOP CALL FLOW"
         )
 
-        decision_score = get_value(
-            decision,
-            "score",
-            "decision_score",
-            "final_score"
+        if top:
+
+            call_text = get_value(
+                top,
+                "top_call_options",
+                "top_calls"
+            )
+
+            if call_text:
+
+                for item in call_text.split("/"):
+
+                    item = item.strip()
+
+                    if item:
+
+                        lines.append(
+                            f"• {item}"
+                        )
+
+            elif option:
+
+                call_strike = get_value(
+                    option,
+                    "rr_call_strike"
+                )
+
+                call_dte = get_value(
+                    option,
+                    "rr_call_dte"
+                )
+
+                call_premium = get_value(
+                    option,
+                    "rr_call_premium"
+                )
+
+                if call_strike:
+
+                    lines.append(
+                        f"CALL ${call_strike}"
+                    )
+
+                if call_dte:
+
+                    lines.append(
+                        f"DTE {call_dte}"
+                    )
+
+                if call_premium:
+
+                    lines.append(
+                        f"Premium "
+                        f"{fmt_money(call_premium)} "
+                        f"[CALCULATED]"
+                    )
+
+            else:
+
+                lines.append(
+                    "⚪ UNAVAILABLE"
+                )
+
+        # ----------------------------------------------------
+        # PUT FLOW
+        # ----------------------------------------------------
+
+        lines.append("")
+        lines.append(
+            "🔴 TOP PUT FLOW"
         )
 
-        if decision_value:
+        if top:
+
+            put_text = get_value(
+                top,
+                "top_put_options",
+                "top_puts"
+            )
+
+            if put_text:
+
+                for item in put_text.split("/"):
+
+                    item = item.strip()
+
+                    if item:
+
+                        lines.append(
+                            f"• {item}"
+                        )
+
+            elif option:
+
+                put_strike = get_value(
+                    option,
+                    "rr_put_strike"
+                )
+
+                put_dte = get_value(
+                    option,
+                    "rr_put_dte"
+                )
+
+                put_premium = get_value(
+                    option,
+                    "rr_put_premium"
+                )
+
+                if put_strike:
+
+                    lines.append(
+                        f"PUT ${put_strike}"
+                    )
+
+                if put_dte:
+
+                    lines.append(
+                        f"DTE {put_dte}"
+                    )
+
+                if put_premium:
+
+                    lines.append(
+                        f"Premium "
+                        f"{fmt_money(put_premium)} "
+                        f"[CALCULATED]"
+                    )
+
+            else:
+
+                lines.append(
+                    "⚪ UNAVAILABLE"
+                )
+
+        # ----------------------------------------------------
+        # RISK REVERSAL
+        # ----------------------------------------------------
+
+        lines.append("")
+        lines.append(
+            "🔥 RISK-REVERSAL"
+        )
+
+        if option:
+
+            rr_score = get_value(
+                option,
+                "rr_score"
+            )
+
+            rr_call_strike = get_value(
+                option,
+                "rr_call_strike"
+            )
+
+            rr_call_dte = get_value(
+                option,
+                "rr_call_dte"
+            )
+
+            rr_call_premium = get_value(
+                option,
+                "rr_call_premium"
+            )
+
+            rr_put_strike = get_value(
+                option,
+                "rr_put_strike"
+            )
+
+            rr_put_dte = get_value(
+                option,
+                "rr_put_dte"
+            )
+
+            rr_put_premium = get_value(
+                option,
+                "rr_put_premium"
+            )
+
+            if rr_score:
+
+                lines.append(
+                    f"RR Score {fmt_number(rr_score)}"
+                )
+
+            lines.append(
+                "CALL BUY EST. 🟢"
+            )
+
+            if rr_call_strike:
+                lines.append(
+                    f"Strike {rr_call_strike}"
+                )
+
+            if rr_call_dte:
+                lines.append(
+                    f"DTE {rr_call_dte}"
+                )
+
+            if rr_call_premium:
+                lines.append(
+                    f"Premium "
+                    f"{fmt_money(rr_call_premium)} "
+                    f"[CALCULATED]"
+                )
+
+            lines.append(
+                "PUT SELL EST. 🔴"
+            )
+
+            if rr_put_strike:
+                lines.append(
+                    f"Strike {rr_put_strike}"
+                )
+
+            if rr_put_dte:
+                lines.append(
+                    f"DTE {rr_put_dte}"
+                )
+
+            if rr_put_premium:
+                lines.append(
+                    f"Premium "
+                    f"{fmt_money(rr_put_premium)} "
+                    f"[CALCULATED]"
+                )
+
+        else:
+
+            lines.append(
+                "⚪ UNAVAILABLE"
+            )
+
+        # ----------------------------------------------------
+        # SUPPORT / RESISTANCE
+        # ----------------------------------------------------
+
+        lines.append("")
+        lines.append(
+            "🧭 SUPPORT / RESISTANCE"
+        )
+
+        source = option or decision
+
+        if source:
+
+            support = get_value(
+                source,
+                "support"
+            )
+
+            resistance = get_value(
+                source,
+                "resistance"
+            )
+
+            if support:
+
+                lines.append(
+                    f"🟢 Support "
+                    f"{CALCULATED(support)}"
+                )
+
+            if resistance:
+
+                lines.append(
+                    f"🔴 Resistance "
+                    f"{CALCULATED(resistance)}"
+                )
+
+        # ----------------------------------------------------
+        # FINAL JUDGEMENT
+        # ----------------------------------------------------
+
+        lines.append("")
+        lines.append(
+            "🧠 종합 판단"
+        )
+
+        if decision:
+
+            decision_reason = get_value(
+                decision,
+                "decision_reason",
+                "reason"
+            )
+
+            if decision_reason:
+
+                for part in decision_reason.split("|"):
+
+                    part = part.strip()
+
+                    if part:
+
+                        lines.append(part)
+
+            decision_value = get_value(
+                decision,
+                "decision"
+            )
+
+            decision_score = get_value(
+                decision,
+                "decision_score",
+                "final_score"
+            )
+
+            lines.append("")
+
+            if decision_value:
+
+                lines.append(
+                    f"{status_emoji(decision_value)} "
+                    f"{decision_value}"
+                )
+
+            if decision_score:
+
+                lines.append(
+                    f"Score "
+                    f"{fmt_number(decision_score)}/100 "
+                    f"[CALCULATED]"
+                )
+
+        # ----------------------------------------------------
+        # FINAL DECISION
+        # ----------------------------------------------------
+
+        lines.append("")
+        lines.append(
+            "🎯 FINAL DECISION"
+        )
+
+        if decision:
+
+            decision_value = get_value(
+                decision,
+                "decision"
+            )
+
+            decision_score = get_value(
+                decision,
+                "decision_score",
+                "final_score"
+            )
+
+            if decision_value:
+
+                lines.append(
+                    f"{status_emoji(decision_value)} "
+                    f"{decision_value}"
+                )
+
+            if decision_score:
+
+                lines.append(
+                    f"Score "
+                    f"{fmt_number(decision_score)}/100"
+                )
+
+        else:
+
+            lines.append(
+                "⚪ UNAVAILABLE"
+            )
+
+        # 구분
+        if position < len(symbols):
 
             lines.append("")
             lines.append(
-                f"{status_emoji(decision_value)} "
-                f"{decision_value}"
+                "────────────────────"
             )
-
-        if decision_score:
-
-            lines.append(
-                f"Score {decision_score}/100 "
-                "[CALCULATED]"
-            )
-
-    else:
-
-        lines.append(
-            "Decision : "
-            + UNAVAILABLE()
-        )
-
-    # --------------------------------------------------------
-    # FINAL DECISION
-    # --------------------------------------------------------
-
-    lines.append("")
-    lines.append(
-        "🎯 FINAL DECISION"
-    )
-
-    if decision:
-
-        decision_value = get_value(
-            decision,
-            "decision",
-            "action",
-            "status",
-            "signal"
-        )
-
-        decision_score = get_value(
-            decision,
-            "score",
-            "decision_score",
-            "final_score"
-        )
-
-        if decision_value:
-
-            lines.append(
-                f"{status_emoji(decision_value)} "
-                f"{decision_value}"
-            )
-
-        if decision_score:
-
-            lines.append(
-                f"Score {decision_score}/100 "
-                "[CALCULATED]"
-            )
-
-    else:
-
-        lines.append(
-            "⚪ "
-            + UNAVAILABLE()
-        )
 
     return lines
 
 
 # ============================================================
-# 8. DISCLAIMER
+# DISCLAIMER
 # ============================================================
 
 def build_disclaimer():
 
     return [
+        "━━━━━━━━━━━━━━━━━━━━━━",
         "⚠️ DATA DISCLAIMER",
         "━━━━━━━━━━━━━━━━━━━━━━",
         "",
@@ -1821,20 +1971,26 @@ def build_disclaimer():
 
 
 # ============================================================
-# 9. SCAN COMPLETE
+# SCAN COMPLETE
 # ============================================================
 
 def build_complete(
     final_rows,
     special_rows,
-    market_rows
+    market_rows,
+    top20_rows
 ):
 
     entries = 0
     watches = 0
     avoids = 0
 
-    for row in final_rows:
+    source = final_rows
+
+    if not source:
+        source = top20_rows
+
+    for row in source:
 
         decision = get_value(
             row,
@@ -1881,15 +2037,17 @@ def build_complete(
             avoids += 1
 
     return [
+        "━━━━━━━━━━━━━━━━━━━━━━",
         "🏁 SCAN COMPLETE",
         "━━━━━━━━━━━━━━━━━━━━━━",
         "",
         "Market Regime",
-        "🟢 CHECKED" if market_rows
+        "🟢 CHECKED"
+        if market_rows
         else "⚪ UNAVAILABLE",
         "",
         "TOP20",
-        f"{min(20, len(final_rows))} 종목",
+        f"{min(20, len(top20_rows))} 종목",
         "",
         "Final Entry",
         f"{entries} 종목",
@@ -1910,13 +2068,13 @@ def build_complete(
 
 
 # ============================================================
-# BUILD REPORT
+# REPORT
 # ============================================================
 
 def build_report():
 
     log(
-        "LOADING ANALYSIS CSV"
+        "LOADING data/analysis RESULTS"
     )
 
     market_rows = read_csv(
@@ -1935,14 +2093,6 @@ def build_report():
         FILES["option_search"]
     )
 
-    greek_rows = read_csv(
-        FILES["greeks"]
-    )
-
-    structure_rows = read_csv(
-        FILES["structure"]
-    )
-
     decision_rows = read_csv(
         FILES["decision"]
     )
@@ -1958,97 +2108,98 @@ def build_report():
     report = []
 
     # ========================================================
-    # FINAL ORDER
+    # 1. FINAL TRADING LIST
     # ========================================================
 
-    # 1
     report.extend(
         build_final_list(
-            final_rows
+            final_rows,
+            decision_rows,
+            top20_rows
         )
     )
 
-    report.append("")
-    report.append("━━━━━━━━━━━━━━━━━━━━━━")
+    # ========================================================
+    # 2. CALL BUY + PUT SELL
+    # ========================================================
 
-    # 2
     report.extend(
         build_special(
-            special_rows
+            option_rows
         )
     )
 
-    report.append("")
-    report.append("━━━━━━━━━━━━━━━━━━━━━━")
+    # ========================================================
+    # 3. MARKET REGIME
+    # ========================================================
 
-    # 3
     report.extend(
         build_market_regime(
             market_rows
         )
     )
 
-    report.append("")
-    report.append("━━━━━━━━━━━━━━━━━━━━━━")
+    # ========================================================
+    # 4. MARKET REGIME SCORE
+    # ========================================================
 
-    # 4
     report.extend(
         build_market_score(
             market_rows
         )
     )
 
-    report.append("")
-    report.append("━━━━━━━━━━━━━━━━━━━━━━")
+    # ========================================================
+    # 5. UNUSUAL FLOW
+    # ========================================================
 
-    # 5
     report.extend(
         build_unusual_flow(
-            unusual_rows
+            unusual_rows,
+            top20_rows
         )
     )
 
-    report.append("")
-    report.append("━━━━━━━━━━━━━━━━━━━━━━")
+    # ========================================================
+    # 6. TOP20
+    # ========================================================
 
-    # 6
     report.extend(
         build_top20(
             top20_rows
         )
     )
 
-    report.append("")
-    report.append("━━━━━━━━━━━━━━━━━━━━━━")
+    # ========================================================
+    # 7. TOP DETAIL
+    # ========================================================
 
-    # 7
     report.extend(
         build_top_detail(
             top20_rows,
-            option_rows,
-            greek_rows,
-            structure_rows,
-            decision_rows
+            decision_rows,
+            option_rows
         )
     )
 
-    report.append("")
-    report.append("━━━━━━━━━━━━━━━━━━━━━━")
+    # ========================================================
+    # 8. DISCLAIMER
+    # ========================================================
 
-    # 8
     report.extend(
         build_disclaimer()
     )
 
-    report.append("")
-    report.append("━━━━━━━━━━━━━━━━━━━━━━")
+    # ========================================================
+    # 9. COMPLETE
+    # ========================================================
 
-    # 9
     report.extend(
         build_complete(
             final_rows,
             special_rows,
-            market_rows
+            market_rows,
+            top20_rows
         )
     )
 
@@ -2094,20 +2245,11 @@ def split_message(
         )
 
         if (
-            current
-            and len(current)
+            len(current)
             + len(section)
             + 2
-            > limit
+            <= limit
         ):
-
-            messages.append(
-                current
-            )
-
-            current = ""
-
-        if len(section) <= limit:
 
             if current:
 
@@ -2117,20 +2259,33 @@ def split_message(
 
         else:
 
-            start = 0
-
-            while start < len(section):
-
-                chunk = section[
-                    start:
-                    start + limit
-                ]
+            if current:
 
                 messages.append(
-                    chunk
+                    current
                 )
 
-                start += limit
+            if len(section) <= limit:
+
+                current = section
+
+            else:
+
+                start = 0
+
+                while start < len(section):
+
+                    chunk = section[
+                        start:start + limit
+                    ]
+
+                    messages.append(
+                        chunk
+                    )
+
+                    start += limit
+
+                current = ""
 
     if current:
 
@@ -2153,13 +2308,7 @@ def telegram_request(
     if not TELEGRAM_BOT_TOKEN:
 
         raise RuntimeError(
-            "TELEGRAM_BOT_TOKEN 없음"
-        )
-
-    if not TELEGRAM_CHAT_ID:
-
-        raise RuntimeError(
-            "TELEGRAM_CHAT_ID 없음"
+            "TELEGRAM_BOT_TOKEN is missing."
         )
 
     url = (
@@ -2170,11 +2319,8 @@ def telegram_request(
     )
 
     data = json.dumps(
-        payload,
-        ensure_ascii=False
-    ).encode(
-        "utf-8"
-    )
+        payload
+    ).encode("utf-8")
 
     request = urllib.request.Request(
         url,
@@ -2197,14 +2343,12 @@ def telegram_request(
                 "utf-8"
             )
 
-        result = json.loads(
-            body
-        )
+        result = json.loads(body)
 
         if not result.get("ok"):
 
             raise RuntimeError(
-                "Telegram API ERROR : "
+                "Telegram API error: "
                 + str(result)
             )
 
@@ -2215,16 +2359,18 @@ def telegram_request(
         body = ""
 
         try:
+
             body = exc.read().decode(
                 "utf-8"
             )
+
         except Exception:
             pass
 
         raise RuntimeError(
-            "Telegram HTTP ERROR "
+            "Telegram HTTP error "
             + str(exc.code)
-            + " : "
+            + ": "
             + body
         )
 
@@ -2233,11 +2379,21 @@ def telegram_request(
 # SEND TELEGRAM
 # ============================================================
 
-def send_telegram(report):
+def send_telegram(text):
 
-    messages = split_message(
-        report
-    )
+    if not TELEGRAM_BOT_TOKEN:
+
+        raise RuntimeError(
+            "TELEGRAM_BOT_TOKEN is missing."
+        )
+
+    if not TELEGRAM_CHAT_ID:
+
+        raise RuntimeError(
+            "TELEGRAM_CHAT_ID is missing."
+        )
+
+    messages = split_message(text)
 
     total = len(messages)
 
@@ -2255,33 +2411,34 @@ def send_telegram(report):
         if total > 1:
 
             prefix = (
-                f"📨 {index}/{total}\n\n"
+                f"📨 MESSAGE {index}/{total}\n\n"
             )
-
-        payload = {
-            "chat_id":
-                TELEGRAM_CHAT_ID,
-
-            "text":
-                prefix + message
-        }
 
         result = telegram_request(
             "sendMessage",
-            payload
+            {
+                "chat_id":
+                    TELEGRAM_CHAT_ID,
+                "text":
+                    prefix + message
+            }
         )
 
         message_id = (
             result
             .get("result", {})
-            .get("message_id")
+            .get("message_id", "N/A")
         )
 
         log(
             f"TELEGRAM SENT "
-            f"{index}/{total} "
-            f"| message_id={message_id}"
+            f"{index}/{total} | "
+            f"message_id={message_id}"
         )
+
+    log(
+        "🔥 TELEGRAM DELIVERY COMPLETE"
+    )
 
 
 # ============================================================
@@ -2293,7 +2450,7 @@ def validate_report(report):
     if not report.strip():
 
         raise RuntimeError(
-            "REPORT EMPTY"
+            "Generated report is empty."
         )
 
     required = [
@@ -2314,19 +2471,17 @@ def validate_report(report):
 
         if section not in report:
 
-            missing.append(
-                section
-            )
+            missing.append(section)
 
     if missing:
 
         raise RuntimeError(
-            "REPORT SECTION MISSING : "
+            "Missing report sections: "
             + str(missing)
         )
 
     log(
-        "REPORT VALIDATION : OK"
+        "REPORT STRUCTURE VALIDATION : OK"
     )
 
 
@@ -2336,99 +2491,33 @@ def validate_report(report):
 
 def main():
 
-    print(
-        "🔥 OPTION FLOW SCANNER"
+    log(
+        "🔥 STEP 12 TELEGRAM REPORTER START"
     )
 
-    print(
-        "STEP 12 TELEGRAM REPORTER"
-    )
-
-    print(
-        "=========================================="
-    )
-
-    if not os.path.isdir(
-        DATA_DIR
-    ):
+    if not os.path.isdir(DATA_DIR):
 
         raise RuntimeError(
-            "DATA DIRECTORY NOT FOUND : "
+            "DATA DIRECTORY NOT FOUND: "
             + DATA_DIR
         )
 
-    if not TELEGRAM_BOT_TOKEN:
-
-        raise RuntimeError(
-            "TELEGRAM_BOT_TOKEN 없음"
-        )
-
-    if not TELEGRAM_CHAT_ID:
-
-        raise RuntimeError(
-            "TELEGRAM_CHAT_ID 없음"
-        )
-
-    print(
-        "TOKEN : OK"
-    )
-
-    print(
-        "CHAT_ID : OK"
-    )
-
-    # --------------------------------------------------------
-    # BUILD
-    # --------------------------------------------------------
-
     report = build_report()
 
-    validate_report(
-        report
-    )
-
-    # --------------------------------------------------------
-    # PREVIEW
-    # --------------------------------------------------------
+    validate_report(report)
 
     print()
-    print(
-        "=" * 72
-    )
-
-    print(
-        "TELEGRAM REPORT PREVIEW"
-    )
-
-    print(
-        "=" * 72
-    )
-
+    print("=" * 72)
+    print("TELEGRAM REPORT PREVIEW")
+    print("=" * 72)
     print(report)
-
-    print(
-        "=" * 72
-    )
-
-    # --------------------------------------------------------
-    # SEND
-    # --------------------------------------------------------
-
-    send_telegram(
-        report
-    )
-
+    print("=" * 72)
     print()
-    print(
-        "=========================================="
-    )
 
-    print(
-        "🔥 TELEGRAM DELIVERY COMPLETE"
-    )
+    send_telegram(report)
 
-    print(
-        "=========================================="
+    log(
+        "🔥 STEP 12 TELEGRAM COMPLETE"
     )
 
 
@@ -2439,3 +2528,4 @@ def main():
 if __name__ == "__main__":
 
     main()
+
