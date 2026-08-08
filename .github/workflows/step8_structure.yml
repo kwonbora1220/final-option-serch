@@ -1,4 +1,4 @@
-```yaml
+
 name: STEP 8 - Option Structure
 
 on:
@@ -85,4 +85,4 @@ jobs:
         with:
           name: option-structure
           path: data/analysis/structure.csv
-```
+
