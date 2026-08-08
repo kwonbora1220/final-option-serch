@@ -1,11 +1,13 @@
 import os
+import re
 from datetime import datetime, timezone
 
+import numpy as np
 import pandas as pd
 
 
 # ============================================================
-# STEP 10 - FINAL REPORT
+# STEP 11 - CALL BUY + PUT SELL STRUCTURE
 # ============================================================
 
 BASE_DIR = os.path.dirname(
@@ -20,20 +22,46 @@ ANALYSIS_DIR = os.path.join(
     "analysis"
 )
 
-INPUT_FILE = os.path.join(
+GREEKS_FILE = os.path.join(
+    ANALYSIS_DIR,
+    "options_greeks.csv"
+)
+
+FLOW_FILE = os.path.join(
+    ANALYSIS_DIR,
+    "unusual_flow.csv"
+)
+
+TOP20_FILE = os.path.join(
+    ANALYSIS_DIR,
+    "top20.csv"
+)
+
+DECISION_FILE = os.path.join(
     ANALYSIS_DIR,
     "decision.csv"
 )
 
-OUTPUT_CSV = os.path.join(
+OUTPUT_FILE = os.path.join(
     ANALYSIS_DIR,
-    "final_report.csv"
+    "call_buy_put_sell.csv"
 )
 
-OUTPUT_MD = os.path.join(
-    ANALYSIS_DIR,
-    "final_report.md"
-)
+
+# ============================================================
+# CONFIG
+# ============================================================
+
+MIN_VOLUME = 1
+MIN_OI = 1
+
+MIN_STRUCTURE_SCORE = 45.0
+
+# Same expiration / strike proximity rules
+MAX_STRIKE_DISTANCE_PCT = 0.10
+
+# Premium approximation
+CONTRACT_MULTIPLIER = 100
 
 
 # ============================================================
@@ -49,8 +77,1002 @@ def log(message):
     )
 
     print(
-        f"[10 FINAL REPORT] {now} | {message}"
+        f"[11 CALL+PUT] {now} | {message}"
     )
+
+
+# ============================================================
+# COLUMN FINDER
+# ============================================================
+
+def find_column(df, candidates):
+
+    normalized = {
+        str(col)
+        .strip()
+        .lower()
+        .replace(" ", "_")
+        .replace("-", "_")
+        .replace("/", "_"): col
+        for col in df.columns
+    }
+
+    for candidate in candidates:
+
+        key = (
+            candidate
+            .strip()
+            .lower()
+            .replace(" ", "_")
+            .replace("-", "_")
+            .replace("/", "_")
+        )
+
+        if key in normalized:
+            return normalized[key]
+
+    return None
+
+
+# ============================================================
+# NUMERIC
+# ============================================================
+
+def numeric(df, column):
+
+    if column is None:
+
+        return pd.Series(
+            np.nan,
+            index=df.index
+        )
+
+    return pd.to_numeric(
+        df[column],
+        errors="coerce"
+    )
+
+
+# ============================================================
+# TEXT NORMALIZATION
+# ============================================================
+
+def clean_text(value):
+
+    if pd.isna(value):
+        return ""
+
+    return (
+        str(value)
+        .strip()
+        .upper()
+    )
+
+
+# ============================================================
+# SIDE NORMALIZATION
+# ============================================================
+
+def normalize_side(value):
+
+    text = clean_text(value)
+
+    if not text:
+        return "UNKNOWN"
+
+    # --------------------------------------------------------
+    # BUY
+    # --------------------------------------------------------
+
+    buy_patterns = [
+        "BUY",
+        "BTO",
+        "BUY TO OPEN",
+        "BOT",
+        "BOUGHT",
+        "LONG",
+        "ASK",
+        "AT ASK"
+    ]
+
+    for pattern in buy_patterns:
+
+        if pattern in text:
+            return "BUY"
+
+    # --------------------------------------------------------
+    # SELL
+    # --------------------------------------------------------
+
+    sell_patterns = [
+        "SELL",
+        "STO",
+        "SELL TO OPEN",
+        "SOLD",
+        "SHORT",
+        "BID",
+        "AT BID"
+    ]
+
+    for pattern in sell_patterns:
+
+        if pattern in text:
+            return "SELL"
+
+    return "UNKNOWN"
+
+
+# ============================================================
+# OPTION TYPE NORMALIZATION
+# ============================================================
+
+def normalize_option_type(value):
+
+    text = clean_text(value)
+
+    if text in {
+        "C",
+        "CALL",
+        "CALLS"
+    }:
+        return "CALL"
+
+    if text in {
+        "P",
+        "PUT",
+        "PUTS"
+    }:
+        return "PUT"
+
+    return "UNKNOWN"
+
+
+# ============================================================
+# TICKER
+# ============================================================
+
+def ticker_column(df):
+
+    return find_column(
+        df,
+        [
+            "ticker",
+            "symbol",
+            "underlying",
+            "underlying_symbol",
+            "stock",
+            "stock_symbol"
+        ]
+    )
+
+
+# ============================================================
+# PREPARE GREEKS
+# ============================================================
+
+def prepare_greeks(df):
+
+    ticker_col = ticker_column(df)
+
+    type_col = find_column(
+        df,
+        [
+            "option_type",
+            "type",
+            "contract_type",
+            "call_put"
+        ]
+    )
+
+    strike_col = find_column(
+        df,
+        [
+            "strike",
+            "strike_price"
+        ]
+    )
+
+    expiration_col = find_column(
+        df,
+        [
+            "expiration",
+            "expiration_date",
+            "expiry",
+            "expirationdate",
+            "exp_date"
+        ]
+    )
+
+    dte_col = find_column(
+        df,
+        [
+            "DTE",
+            "dte",
+            "days_to_expiration"
+        ]
+    )
+
+    price_col = find_column(
+        df,
+        [
+            "underlying_price",
+            "current_price",
+            "stock_price",
+            "underlyingPrice"
+        ]
+    )
+
+    volume_col = find_column(
+        df,
+        [
+            "volume",
+            "option_volume"
+        ]
+    )
+
+    oi_col = find_column(
+        df,
+        [
+            "open_interest",
+            "oi"
+        ]
+    )
+
+    delta_col = find_column(
+        df,
+        [
+            "delta"
+        ]
+    )
+
+    iv_col = find_column(
+        df,
+        [
+            "impliedVolatility",
+            "implied_volatility",
+            "iv"
+        ]
+    )
+
+    bid_col = find_column(
+        df,
+        [
+            "bid"
+        ]
+    )
+
+    ask_col = find_column(
+        df,
+        [
+            "ask"
+        ]
+    )
+
+    last_col = find_column(
+        df,
+        [
+            "last",
+            "last_price",
+            "lastPrice"
+        ]
+    )
+
+    if ticker_col is None:
+        raise ValueError(
+            "Ticker column not found in options_greeks.csv"
+        )
+
+    if type_col is None:
+        raise ValueError(
+            "Option type column not found"
+        )
+
+    if strike_col is None:
+        raise ValueError(
+            "Strike column not found"
+        )
+
+    result = pd.DataFrame(index=df.index)
+
+    result["ticker"] = (
+        df[ticker_col]
+        .astype(str)
+        .str.upper()
+        .str.strip()
+    )
+
+    result["option_type"] = (
+        df[type_col]
+        .apply(normalize_option_type)
+    )
+
+    result["strike"] = numeric(
+        df,
+        strike_col
+    )
+
+    result["expiration"] = (
+        df[expiration_col]
+        .astype(str).str.strip()
+        if expiration_col is not None
+        else ""
+    )
+
+    result["DTE"] = numeric(
+        df,
+        dte_col
+    )
+
+    result["underlying_price"] = numeric(
+        df,
+        price_col
+    )
+
+    result["volume"] = numeric(
+        df,
+        volume_col
+    ).fillna(0)
+
+    result["open_interest"] = numeric(
+        df,
+        oi_col
+    ).fillna(0)
+
+    result["delta"] = numeric(
+        df,
+        delta_col
+    )
+
+    result["iv"] = numeric(
+        df,
+        iv_col
+    )
+
+    result["bid"] = numeric(
+        df,
+        bid_col
+    )
+
+    result["ask"] = numeric(
+        df,
+        ask_col
+    )
+
+    result["last"] = numeric(
+        df,
+        last_col
+    )
+
+    # --------------------------------------------------------
+    # Premium approximation
+    # --------------------------------------------------------
+
+    price = result["last"]
+
+    price = price.fillna(
+        (
+            result["bid"]
+            + result["ask"]
+        ) / 2.0
+    )
+
+    result["premium"] = (
+        price.fillna(0)
+        * result["volume"]
+        * CONTRACT_MULTIPLIER
+    )
+
+    return result
+
+
+# ============================================================
+# PREPARE FLOW
+# ============================================================
+
+def prepare_flow(df):
+
+    ticker_col = ticker_column(df)
+
+    if ticker_col is None:
+        raise ValueError(
+            "Ticker column not found in unusual_flow.csv"
+        )
+
+    type_col = find_column(
+        df,
+        [
+            "option_type",
+            "type",
+            "contract_type",
+            "call_put"
+        ]
+    )
+
+    side_col = find_column(
+        df,
+        [
+            "side",
+            "trade_side",
+            "direction",
+            "transaction_type",
+            "trade_type",
+            "order_type",
+            "flow_type",
+            "sentiment"
+        ]
+    )
+
+    strike_col = find_column(
+        df,
+        [
+            "strike",
+            "strike_price"
+        ]
+    )
+
+    expiration_col = find_column(
+        df,
+        [
+            "expiration",
+            "expiration_date",
+            "expiry",
+            "expirationdate",
+            "exp_date"
+        ]
+    )
+
+    volume_col = find_column(
+        df,
+        [
+            "volume",
+            "option_volume",
+            "trade_volume"
+        ]
+    )
+
+    premium_col = find_column(
+        df,
+        [
+            "premium",
+            "estimated_premium",
+            "estimated_traded_premium",
+            "premium_flow",
+            "total_premium"
+        ]
+    )
+
+    result = pd.DataFrame(index=df.index)
+
+    result["ticker"] = (
+        df[ticker_col]
+        .astype(str)
+        .str.upper()
+        .str.strip()
+    )
+
+    if type_col is not None:
+
+        result["option_type"] = (
+            df[type_col]
+            .apply(normalize_option_type)
+        )
+
+    else:
+
+        result["option_type"] = "UNKNOWN"
+
+    if side_col is not None:
+
+        result["side"] = (
+            df[side_col]
+            .apply(normalize_side)
+        )
+
+    else:
+
+        result["side"] = "UNKNOWN"
+
+    result["strike"] = numeric(
+        df,
+        strike_col
+    )
+
+    result["expiration"] = (
+        df[expiration_col]
+        .astype(str).str.strip()
+        if expiration_col is not None
+        else ""
+    )
+
+    result["volume"] = numeric(
+        df,
+        volume_col
+    ).fillna(0)
+
+    result["premium"] = numeric(
+        df,
+        premium_col
+    ).fillna(0)
+
+    return result
+
+
+# ============================================================
+# TOP20
+# ============================================================
+
+def load_top20():
+
+    df = pd.read_csv(
+        TOP20_FILE
+    )
+
+    column = ticker_column(df)
+
+    if column is None:
+        raise ValueError(
+            "Unable to identify TOP20 ticker column"
+        )
+
+    return (
+        df[column]
+        .dropna()
+        .astype(str)
+        .str.upper()
+        .str.strip()
+        .drop_duplicates()
+        .tolist()
+    )
+
+
+# ============================================================
+# DECISION
+# ============================================================
+
+def load_decisions():
+
+    if not os.path.exists(
+        DECISION_FILE
+    ):
+        return {}
+
+    df = pd.read_csv(
+        DECISION_FILE
+    )
+
+    ticker_col = ticker_column(df)
+
+    decision_col = find_column(
+        df,
+        [
+            "decision",
+            "final_decision"
+        ]
+    )
+
+    score_col = find_column(
+        df,
+        [
+            "decision_score",
+            "score"
+        ]
+    )
+
+    if ticker_col is None:
+        return {}
+
+    result = {}
+
+    for _, row in df.iterrows():
+
+        ticker = clean_text(
+            row[ticker_col]
+        )
+
+        result[ticker] = {
+            "decision": (
+                clean_text(row[decision_col])
+                if decision_col is not None
+                else ""
+            ),
+            "decision_score": (
+                float(row[score_col])
+                if score_col is not None
+                and pd.notna(row[score_col])
+                else np.nan
+            )
+        }
+
+    return result
+
+
+# ============================================================
+# STRUCTURE SCORE
+# ============================================================
+
+def calculate_structure_score(
+    call_volume,
+    put_volume,
+    call_premium,
+    put_premium,
+    call_delta,
+    put_delta,
+    same_expiration
+):
+
+    score = 0.0
+
+    # --------------------------------------------------------
+    # Volume balance
+    # --------------------------------------------------------
+
+    total_volume = (
+        call_volume
+        + put_volume
+    )
+
+    if total_volume > 0:
+
+        buy_share = (
+            call_volume
+            / total_volume
+        )
+
+        sell_share = (
+            put_volume
+            / total_volume
+        )
+
+        score += (
+            min(
+                buy_share,
+                1.0
+            ) * 20
+        )
+
+        score += (
+            min(
+                sell_share,
+                1.0
+            ) * 20
+        )
+
+    # --------------------------------------------------------
+    # Premium
+    # --------------------------------------------------------
+
+    if call_premium > 0:
+        score += 15
+
+    if put_premium > 0:
+        score += 15
+
+    # --------------------------------------------------------
+    # Delta confirmation
+    # --------------------------------------------------------
+
+    if not pd.isna(call_delta):
+
+        if call_delta > 0:
+            score += 5
+
+    if not pd.isna(put_delta):
+
+        if put_delta < 0:
+            score += 5
+
+    # --------------------------------------------------------
+    # Same expiration
+    # --------------------------------------------------------
+
+    if same_expiration:
+        score += 5
+
+    return min(
+        100.0,
+        score
+    )
+
+
+# ============================================================
+# BUILD CANDIDATES
+# ============================================================
+
+def build_candidates(
+    greeks,
+    flow,
+    top20,
+    decisions
+):
+
+    rows = []
+
+    # --------------------------------------------------------
+    # Flow must contain actual direction information
+    # --------------------------------------------------------
+
+    flow_direction_available = (
+        (flow["side"] == "BUY").any()
+        or
+        (flow["side"] == "SELL").any()
+    )
+
+    print()
+    print(
+        "FLOW DIRECTION CHECK"
+    )
+    print("----------------------------------------")
+
+    print(
+        f"BUY ROWS  : "
+        f"{(flow['side'] == 'BUY').sum()}"
+    )
+
+    print(
+        f"SELL ROWS : "
+        f"{(flow['side'] == 'SELL').sum()}"
+    )
+
+    print(
+        f"UNKNOWN   : "
+        f"{(flow['side'] == 'UNKNOWN').sum()}"
+    )
+
+    if not flow_direction_available:
+
+        log(
+            "WARNING: No explicit BUY/SELL "
+            "direction detected in unusual_flow.csv"
+        )
+
+        return pd.DataFrame()
+
+    # --------------------------------------------------------
+    # Process TOP20
+    # --------------------------------------------------------
+
+    for rank, ticker in enumerate(
+        top20,
+        start=1
+    ):
+
+        ticker_flow = flow[
+            flow["ticker"] == ticker
+        ].copy()
+
+        if ticker_flow.empty:
+            continue
+
+        call_buy = ticker_flow[
+            (
+                ticker_flow["option_type"]
+                == "CALL"
+            )
+            &
+            (
+                ticker_flow["side"]
+                == "BUY"
+            )
+        ].copy()
+
+        put_sell = ticker_flow[
+            (
+                ticker_flow["option_type"]
+                == "PUT"
+            )
+            &
+            (
+                ticker_flow["side"]
+                == "SELL"
+            )
+        ].copy()
+
+        if call_buy.empty:
+            continue
+
+        if put_sell.empty:
+            continue
+
+        # ----------------------------------------------------
+        # Aggregate
+        # ----------------------------------------------------
+
+        call_volume = float(
+            call_buy["volume"].sum()
+        )
+
+        put_volume = float(
+            put_sell["volume"].sum()
+        )
+
+        call_premium = float(
+            call_buy["premium"].sum()
+        )
+
+        put_premium = float(
+            put_sell["premium"].sum()
+        )
+
+        # ----------------------------------------------------
+        # Greeks lookup
+        # ----------------------------------------------------
+
+        ticker_greeks = greeks[
+            greeks["ticker"] == ticker
+        ].copy()
+
+        call_greeks = ticker_greeks[
+            ticker_greeks["option_type"]
+            == "CALL"
+        ]
+
+        put_greeks = ticker_greeks[
+            ticker_greeks["option_type"]
+            == "PUT"
+        ]
+
+        call_delta = (
+            call_greeks["delta"].mean()
+            if not call_greeks.empty
+            else np.nan
+        )
+
+        put_delta = (
+            put_greeks["delta"].mean()
+            if not put_greeks.empty
+            else np.nan
+        )
+
+        # ----------------------------------------------------
+        # Expiration overlap
+        # ----------------------------------------------------
+
+        call_exp = set(
+            call_buy[
+                "expiration"
+            ]
+            .replace("", np.nan)
+            .dropna()
+            .astype(str)
+        )
+
+        put_exp = set(
+            put_sell[
+                "expiration"
+            ]
+            .replace("", np.nan)
+            .dropna()
+            .astype(str)
+        )
+
+        common_exp = (
+            call_exp & put_exp
+        )
+
+        same_expiration = (
+            len(common_exp) > 0
+        )
+
+        # ----------------------------------------------------
+        # Strike ranges
+        # ----------------------------------------------------
+
+        call_strikes = (
+            call_buy["strike"]
+            .dropna()
+        )
+
+        put_strikes = (
+            put_sell["strike"]
+            .dropna()
+        )
+
+        call_strike = (
+            float(call_strikes.median())
+            if not call_strikes.empty
+            else np.nan
+        )
+
+        put_strike = (
+            float(put_strikes.median())
+            if not put_strikes.empty
+            else np.nan
+        )
+
+        # ----------------------------------------------------
+        # Structure score
+        # ----------------------------------------------------
+
+        structure_score = (
+            calculate_structure_score(
+                call_volume,
+                put_volume,
+                call_premium,
+                put_premium,
+                call_delta,
+                put_delta,
+                same_expiration
+            )
+        )
+
+        if (
+            structure_score
+            < MIN_STRUCTURE_SCORE
+        ):
+            continue
+
+        decision = decisions.get(
+            ticker,
+            {}
+        )
+
+        rows.append({
+
+            "rank": rank,
+
+            "ticker": ticker,
+
+            "decision": decision.get(
+                "decision",
+                ""
+            ),
+
+            "decision_score": decision.get(
+                "decision_score",
+                np.nan
+            ),
+
+            "call_buy_volume":
+                call_volume,
+
+            "put_sell_volume":
+                put_volume,
+
+            "call_buy_premium":
+                call_premium,
+
+            "put_sell_premium":
+                put_premium,
+
+            "call_buy_strike":
+                call_strike,
+
+            "put_sell_strike":
+                put_strike,
+
+            "call_delta":
+                call_delta,
+
+            "put_delta":
+                put_delta,
+
+            "same_expiration":
+                same_expiration,
+
+            "common_expiration":
+                "|".join(
+                    sorted(common_exp)
+                ),
+
+            "structure_score":
+                structure_score,
+
+            "structure":
+                "CALL BUY + PUT SELL",
+
+            "data_source":
+                "CALCULATED + FLOW",
+
+        })
+
+        log(
+            f"{ticker} | "
+            f"CALL BUY {call_volume:.0f} | "
+            f"PUT SELL {put_volume:.0f} | "
+            f"SCORE {structure_score:.1f}"
+        )
+
+    return pd.DataFrame(rows)
 
 
 # ============================================================
@@ -65,171 +1087,170 @@ def main():
     # INPUT CHECK
     # --------------------------------------------------------
 
-    if not os.path.exists(INPUT_FILE):
+    required_files = {
+        "GREEKS": GREEKS_FILE,
+        "FLOW": FLOW_FILE,
+        "TOP20": TOP20_FILE,
+        "DECISION": DECISION_FILE,
+    }
 
-        raise FileNotFoundError(
-            f"Decision file not found: {INPUT_FILE}"
+    print()
+    print("=" * 72)
+    print("STEP 11 INPUT CHECK")
+    print("=" * 72)
+
+    for name, path in required_files.items():
+
+        exists = os.path.exists(path)
+
+        print(
+            f"{name:<12} : "
+            f"{'OK' if exists else 'MISSING'}"
         )
+
+        if not exists:
+
+            raise FileNotFoundError(
+                f"{name} file not found: {path}"
+            )
+
+    # --------------------------------------------------------
+    # LOAD
+    # --------------------------------------------------------
+
+    greeks_raw = pd.read_csv(
+        GREEKS_FILE
+    )
+
+    flow_raw = pd.read_csv(
+        FLOW_FILE
+    )
+
+    top20 = load_top20()
+
+    decisions = load_decisions()
 
     log(
-        f"INPUT : {INPUT_FILE}"
+        f"GREEKS ROWS : "
+        f"{len(greeks_raw):,}"
     )
-
-    df = pd.read_csv(
-        INPUT_FILE
-    )
-
-    if df.empty:
-
-        raise ValueError(
-            "decision.csv is empty"
-        )
 
     log(
-        f"INPUT ROWS : {len(df)}"
+        f"FLOW ROWS   : "
+        f"{len(flow_raw):,}"
+    )
+
+    log(
+        f"TOP20       : "
+        f"{len(top20)}"
     )
 
     # --------------------------------------------------------
-    # REQUIRED COLUMNS
+    # PREPARE
     # --------------------------------------------------------
 
-    required_columns = [
-
-        "ticker",
-        "market_score",
-        "market_regime",
-
-        "ndx_direction",
-        "spy_direction",
-        "soxx_direction",
-        "dia_direction",
-
-        "flow_score",
-
-        "current_price",
-
-        "call_wall",
-        "put_wall",
-
-        "support",
-        "resistance",
-
-        "net_gex",
-
-        "structure",
-
-        "decision_score",
-        "decision",
-
-        "reason",
-
-    ]
-
-    missing = [
-        column
-        for column in required_columns
-        if column not in df.columns
-    ]
-
-    if missing:
-
-        raise ValueError(
-            "Missing required columns: "
-            + ", ".join(missing)
-        )
-
-    # --------------------------------------------------------
-    # NUMERIC STANDARDIZATION
-    # --------------------------------------------------------
-
-    numeric_columns = [
-
-        "market_score",
-        "flow_score",
-        "current_price",
-
-        "call_wall",
-        "put_wall",
-
-        "support",
-        "resistance",
-
-        "net_gex",
-
-        "decision_score",
-
-    ]
-
-    for column in numeric_columns:
-
-        df[column] = pd.to_numeric(
-            df[column],
-            errors="coerce"
-        )
-
-    # --------------------------------------------------------
-    # FINAL SORT
-    # --------------------------------------------------------
-
-    df = (
-        df
-        .sort_values(
-            "decision_score",
-            ascending=False
-        )
-        .reset_index(
-            drop=True
-        )
+    greeks = prepare_greeks(
+        greeks_raw
     )
 
-    df["final_rank"] = (
-        df.index + 1
+    flow = prepare_flow(
+        flow_raw
     )
 
     # --------------------------------------------------------
-    # FINAL REPORT COLUMNS
+    # FILTER TOP20
     # --------------------------------------------------------
 
-    report_columns = [
+    greeks = greeks[
+        greeks["ticker"].isin(
+            top20
+        )
+    ].copy()
 
-        "final_rank",
-        "ticker",
-
-        "market_score",
-        "market_regime",
-
-        "ndx_direction",
-        "spy_direction",
-        "soxx_direction",
-        "dia_direction",
-
-        "flow_score",
-
-        "current_price",
-
-        "call_wall",
-        "put_wall",
-
-        "support",
-        "resistance",
-
-        "net_gex",
-
-        "structure",
-
-        "decision_score",
-        "decision",
-
-        "reason",
-
-    ]
-
-    report = df[
-        report_columns
+    flow = flow[
+        flow["ticker"].isin(
+            top20
+        )
     ].copy()
 
     # --------------------------------------------------------
-    # SAVE CSV
+    # BUILD
+    # --------------------------------------------------------
+
+    output = build_candidates(
+        greeks,
+        flow,
+        top20,
+        decisions
+    )
+
+    # --------------------------------------------------------
+    # EMPTY RESULT
+    # --------------------------------------------------------
+
+    if output.empty:
+
+        print()
+        print("=" * 72)
+        print(
+            "STEP 11 RESULT"
+        )
+        print("=" * 72)
+
+        print(
+            "CALL BUY + PUT SELL "
+            "STRUCTURE : NONE"
+        )
+
+        print(
+            "This is a valid result."
+        )
+
+        # Empty CSV with schema
+        output = pd.DataFrame(
+            columns=[
+                "rank",
+                "ticker",
+                "decision",
+                "decision_score",
+                "call_buy_volume",
+                "put_sell_volume",
+                "call_buy_premium",
+                "put_sell_premium",
+                "call_buy_strike",
+                "put_sell_strike",
+                "call_delta",
+                "put_delta",
+                "same_expiration",
+                "common_expiration",
+                "structure_score",
+                "structure",
+                "data_source",
+            ]
+        )
+
+    else:
+
+        output = (
+            output
+            .sort_values(
+                [
+                    "structure_score",
+                    "decision_score"
+                ],
+                ascending=False
+            )
+            .reset_index(
+                drop=True
+            )
+        )
+
+        output["final_rank"] = (
+            output.index + 1
+        )
+
+    # --------------------------------------------------------
+    # SAVE
     # --------------------------------------------------------
 
     os.makedirs(
@@ -237,376 +1258,9 @@ def main():
         exist_ok=True
     )
 
-    report.to_csv(
-        OUTPUT_CSV,
+    output.to_csv(
+        OUTPUT_FILE,
         index=False
-    )
-
-    log(
-        f"CSV SAVED : {OUTPUT_CSV}"
-    )
-
-    # --------------------------------------------------------
-    # MARKET SUMMARY
-    # --------------------------------------------------------
-
-    latest = report.iloc[0]
-
-    market_score = float(
-        report["market_score"]
-        .dropna()
-        .iloc[0]
-    )
-
-    market_regime = str(
-        report["market_regime"]
-        .iloc[0]
-    )
-
-    ndx_direction = str(
-        report["ndx_direction"]
-        .iloc[0]
-    )
-
-    spy_direction = str(
-        report["spy_direction"]
-        .iloc[0]
-    )
-
-    soxx_direction = str(
-        report["soxx_direction"]
-        .iloc[0]
-    )
-
-    dia_direction = str(
-        report["dia_direction"]
-        .iloc[0]
-    )
-
-    # --------------------------------------------------------
-    # DECISION COUNTS
-    # --------------------------------------------------------
-
-    entry_count = (
-        report["decision"]
-        == "🟢 진입"
-    ).sum()
-
-    watch_count = (
-        report["decision"]
-        == "🟡 관망"
-    ).sum()
-
-    avoid_count = (
-        report["decision"]
-        == "🔴 회피"
-    ).sum()
-
-    # --------------------------------------------------------
-    # MARKDOWN
-    # --------------------------------------------------------
-
-    generated_at = datetime.now(
-        timezone.utc
-    ).strftime(
-        "%Y-%m-%d %H:%M:%S UTC"
-    )
-
-    lines = []
-
-    lines.append(
-        "# 🇺🇸 US OPTIONS FINAL REPORT"
-    )
-
-    lines.append("")
-
-    lines.append(
-        f"Generated: {generated_at}"
-    )
-
-    lines.append("")
-
-    # --------------------------------------------------------
-    # MARKET
-    # --------------------------------------------------------
-
-    lines.append(
-        "## 1. MARKET REGIME"
-    )
-
-    lines.append("")
-
-    lines.append(
-        f"- Market Score: **{market_score:.2f}**"
-    )
-
-    lines.append(
-        f"- Market Regime: **{market_regime}**"
-    )
-
-    lines.append(
-        f"- NDX: **{ndx_direction}**"
-    )
-
-    lines.append(
-        f"- SPY: **{spy_direction}**"
-    )
-
-    lines.append(
-        f"- SOXX: **{soxx_direction}**"
-    )
-
-    lines.append(
-        f"- DIA: **{dia_direction}**"
-    )
-
-    lines.append("")
-
-    # --------------------------------------------------------
-    # DECISION SUMMARY
-    # --------------------------------------------------------
-
-    lines.append(
-        "## 2. DECISION SUMMARY"
-    )
-
-    lines.append("")
-
-    lines.append(
-        f"- 🟢 진입: **{entry_count}**"
-    )
-
-    lines.append(
-        f"- 🟡 관망: **{watch_count}**"
-    )
-
-    lines.append(
-        f"- 🔴 회피: **{avoid_count}**"
-    )
-
-    lines.append("")
-
-    # --------------------------------------------------------
-    # TOP DECISIONS
-    # --------------------------------------------------------
-
-    lines.append(
-        "## 3. TOP DECISIONS"
-    )
-
-    lines.append("")
-
-    lines.append(
-        "| Rank | Ticker | Decision Score | Flow | Price | Decision |"
-    )
-
-    lines.append(
-        "|---:|---|---:|---:|---:|---|"
-    )
-
-    for _, row in report.iterrows():
-
-        price = row["current_price"]
-
-        if pd.isna(price):
-
-            price_text = "-"
-
-        else:
-
-            price_text = f"{price:.2f}"
-
-        flow = row["flow_score"]
-
-        if pd.isna(flow):
-
-            flow_text = "-"
-
-        else:
-
-            flow_text = f"{flow:.2f}"
-
-        lines.append(
-            f"| {int(row['final_rank'])} "
-            f"| {row['ticker']} "
-            f"| {row['decision_score']:.2f} "
-            f"| {flow_text} "
-            f"| {price_text} "
-            f"| {row['decision']} |"
-        )
-
-    lines.append("")
-
-    # --------------------------------------------------------
-    # DETAILED ANALYSIS
-    # --------------------------------------------------------
-
-    lines.append(
-        "## 4. DETAILED ANALYSIS"
-    )
-
-    lines.append("")
-
-    for _, row in report.iterrows():
-
-        ticker = row["ticker"]
-
-        lines.append(
-            f"### {int(row['final_rank'])}. {ticker}"
-        )
-
-        lines.append("")
-
-        lines.append(
-            f"- Decision: **{row['decision']}**"
-        )
-
-        lines.append(
-            f"- Decision Score: **{row['decision_score']:.2f}**"
-        )
-
-        if not pd.isna(
-            row["flow_score"]
-        ):
-
-            lines.append(
-                f"- Flow Score: **{row['flow_score']:.2f}**"
-            )
-
-        if not pd.isna(
-            row["current_price"]
-        ):
-
-            lines.append(
-                f"- Current Price: **{row['current_price']:.2f}**"
-            )
-
-        if not pd.isna(
-            row["call_wall"]
-        ):
-
-            lines.append(
-                f"- Call Wall: **{row['call_wall']:.2f}**"
-            )
-
-        if not pd.isna(
-            row["put_wall"]
-        ):
-
-            lines.append(
-                f"- Put Wall: **{row['put_wall']:.2f}**"
-            )
-
-        if not pd.isna(
-            row["support"]
-        ):
-
-            lines.append(
-                f"- Support: **{row['support']:.2f}**"
-            )
-
-        if not pd.isna(
-            row["resistance"]
-        ):
-
-            lines.append(
-                f"- Resistance: **{row['resistance']:.2f}**"
-            )
-
-        if not pd.isna(
-            row["net_gex"]
-        ):
-
-            lines.append(
-                f"- Net GEX: **{row['net_gex']:.4e}**"
-            )
-
-        lines.append(
-            f"- Structure: **{row['structure']}**"
-        )
-
-        lines.append(
-            f"- Reason: {row['reason']}"
-        )
-
-        lines.append("")
-
-    # --------------------------------------------------------
-    # WEIGHT INFORMATION
-    # --------------------------------------------------------
-
-    lines.append(
-        "## 5. DECISION ENGINE"
-    )
-
-    lines.append("")
-
-    lines.append(
-        "| Component | Weight |"
-    )
-
-    lines.append(
-        "|---|---:|"
-    )
-
-    lines.append(
-        "| Market | 25% |"
-    )
-
-    lines.append(
-        "| Flow | 30% |"
-    )
-
-    lines.append(
-        "| Structure | 20% |"
-    )
-
-    lines.append(
-        "| Price / Wall | 15% |"
-    )
-
-    lines.append(
-        "| Index | 10% |"
-    )
-
-    lines.append("")
-
-    lines.append(
-        "### Decision Threshold"
-    )
-
-    lines.append("")
-
-    lines.append(
-        "- 🟢 ENTRY: **>= 75**"
-    )
-
-    lines.append(
-        "- 🟡 WATCH: **55 - 74.99**"
-    )
-
-    lines.append(
-        "- 🔴 AVOID: **< 55**"
-    )
-
-    lines.append("")
-
-    # --------------------------------------------------------
-    # SAVE MARKDOWN
-    # --------------------------------------------------------
-
-    with open(
-        OUTPUT_MD,
-        "w",
-        encoding="utf-8"
-    ) as f:
-
-        f.write(
-            "\n".join(lines)
-        )
-
-    log(
-        f"MARKDOWN SAVED : {OUTPUT_MD}"
     )
 
     # --------------------------------------------------------
@@ -614,89 +1268,90 @@ def main():
     # --------------------------------------------------------
 
     print()
-
     print("=" * 72)
-    print("🔎 STEP 10 VALIDATION")
+    print("🔎 STEP 11 VALIDATION")
     print("=" * 72)
 
     print(
-        f"INPUT DECISION ROWS : {len(df)}"
+        f"INPUT GREEKS ROWS : "
+        f"{len(greeks_raw):,}"
     )
 
     print(
-        f"FINAL REPORT ROWS   : {len(report)}"
+        f"INPUT FLOW ROWS   : "
+        f"{len(flow_raw):,}"
     )
 
     print(
-        f"UNIQUE TICKERS      : "
-        f"{report['ticker'].nunique()}"
-    )
-
-    print()
-
-    print(
-        f"🟢 ENTRY            : "
-        f"{entry_count}"
+        f"TOP20 TICKERS     : "
+        f"{len(top20)}"
     )
 
     print(
-        f"🟡 WATCH            : "
-        f"{watch_count}"
+        f"STRUCTURE ROWS    : "
+        f"{len(output)}"
     )
 
-    print(
-        f"🔴 AVOID            : "
-        f"{avoid_count}"
-    )
+    if not output.empty:
 
-    print()
-
-    print(
-        "DECISION SCORE VALID : "
-        f"{report['decision_score'].notna().sum()}"
-    )
-
-    print(
-        "DECISION VALID       : "
-        f"{report['decision'].notna().sum()}"
-    )
-
-    print()
-
-    print(
-        "TOP 10 FINAL REPORT"
-    )
-
-    print("-" * 72)
-
-    print(
-        report[
-            [
-                "final_rank",
-                "ticker",
-                "decision_score",
-                "flow_score",
-                "decision"
-            ]
-        ].to_string(
-            index=False
+        print(
+            f"UNIQUE TICKERS    : "
+            f"{output['ticker'].nunique()}"
         )
-    )
+
+        print(
+            f"STRUCTURE VALID   : "
+            f"{output['structure'].notna().sum()}"
+        )
+
+        print(
+            f"SCORE VALID       : "
+            f"{output['structure_score'].notna().sum()}"
+        )
+
+        print()
+        print(
+            "CALL BUY + PUT SELL PREVIEW"
+        )
+
+        print(
+            "----------------------------------------"
+        )
+
+        print(
+            output[
+                [
+                    "final_rank",
+                    "ticker",
+                    "decision",
+                    "call_buy_volume",
+                    "put_sell_volume",
+                    "call_buy_premium",
+                    "put_sell_premium",
+                    "structure_score",
+                    "structure"
+                ]
+            ].to_string(
+                index=False
+            )
+        )
+
+    else:
+
+        print(
+            "NO MATCHING STRUCTURE"
+        )
 
     print()
-
     print(
-        f"CSV OUTPUT : {OUTPUT_CSV}"
-    )
-
-    print(
-        f"MD OUTPUT  : {OUTPUT_MD}"
+        "OUTPUT FILE : "
+        "data/analysis/call_buy_put_sell.csv"
     )
 
     print("=" * 72)
 
     log(
-        "STEP 10 FINAL REPORT COMPLETE"
+        "STEP 11 CALL BUY + PUT SELL COMPLETE"
     )
 
 
