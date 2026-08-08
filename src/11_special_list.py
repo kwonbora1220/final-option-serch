@@ -1,4 +1,3 @@
-
 import os
 from datetime import datetime, timezone
 
@@ -8,10 +7,13 @@ import pandas as pd
 
 # ============================================================
 # STEP 11 - SPECIAL LIST
+#
 # CALL BUY + PUT SELL
 # ============================================================
 
-INPUT_FILE = "data/analysis/unusual_flow.csv"
+INPUT_FILE = (
+    "data/analysis/unusual_flow.csv"
+)
 
 OUTPUT_DIR = "data/analysis"
 
@@ -39,6 +41,7 @@ MAX_EXPIRATION_DISTANCE = 7
 # ============================================================
 
 def log(message):
+
     now = datetime.now(
         timezone.utc
     ).strftime(
@@ -55,6 +58,7 @@ def log(message):
 # ============================================================
 
 def normalize_column_name(value):
+
     return (
         str(value)
         .strip()
@@ -65,13 +69,17 @@ def normalize_column_name(value):
 
 
 def find_column(df, candidates):
+
     normalized = {
         normalize_column_name(col): col
         for col in df.columns
     }
 
     for candidate in candidates:
-        key = normalize_column_name(candidate)
+
+        key = normalize_column_name(
+            candidate
+        )
 
         if key in normalized:
             return normalized[key]
@@ -80,7 +88,9 @@ def find_column(df, candidates):
 
 
 def numeric_series(df, column):
+
     if column is None:
+
         return pd.Series(
             np.nan,
             index=df.index,
@@ -95,6 +105,22 @@ def numeric_series(df, column):
 
 # ============================================================
 # SIDE NORMALIZATION
+#
+# STEP 5 produces:
+#
+#   BUY EST.
+#   SELL EST.
+#   UNKNOWN
+#
+# STEP 11 converts those into:
+#
+#   BUY
+#   SELL
+#   ""
+#
+# IMPORTANT:
+# BUY EST. / SELL EST. are estimates,
+# NOT confirmed exchange trade direction.
 # ============================================================
 
 def normalize_side(value):
@@ -125,6 +151,11 @@ def normalize_side(value):
         "BTOC",
         "BUYTOOPEN",
         "BUYTOCLOSE",
+
+        # STEP 5
+        "BUY_EST.",
+        "BUY_EST",
+        "BUY_ESTIMATED",
     }:
         return "BUY"
 
@@ -143,11 +174,18 @@ def normalize_side(value):
         "STOC",
         "SELLTOOPEN",
         "SELLTOCLOSE",
+
+        # STEP 5
+        "SELL_EST.",
+        "SELL_EST",
+        "SELL_ESTIMATED",
     }:
         return "SELL"
 
     # --------------------------------------------------------
-    # DO NOT GUESS UNKNOWN
+    # UNKNOWN
+    #
+    # DO NOT GUESS.
     # --------------------------------------------------------
 
     return ""
@@ -218,13 +256,16 @@ def minmax_score(series):
     minimum = values.min()
 
     if not np.isfinite(maximum):
+
         return pd.Series(
             0.0,
             index=values.index,
         )
 
     if maximum == minimum:
+
         if maximum > 0:
+
             return pd.Series(
                 100.0,
                 index=values.index,
@@ -390,19 +431,22 @@ def prepare_data(raw):
     )
 
     if symbol_col is None:
+
         raise ValueError(
             "Symbol column not found"
         )
 
     if option_type_col is None:
+
         raise ValueError(
             "Option type column not found"
         )
 
     if side_col is None:
+
         raise ValueError(
             "trade_side_estimate column not found. "
-            "STEP 11 requires actual BUY/SELL direction."
+            "STEP 11 requires BUY/SELL direction."
         )
 
     result = pd.DataFrame(
@@ -418,12 +462,16 @@ def prepare_data(raw):
 
     result["option_type"] = (
         raw[option_type_col]
-        .apply(normalize_option_type)
+        .apply(
+            normalize_option_type
+        )
     )
 
     result["side"] = (
         raw[side_col]
-        .apply(normalize_side)
+        .apply(
+            normalize_side
+        )
     )
 
     result["strike"] = numeric_series(
@@ -436,12 +484,18 @@ def prepare_data(raw):
         dte_col,
     )
 
-    result["expiration"] = (
-        raw[expiration_col]
-        .apply(normalize_expiration)
-        if expiration_col is not None
-        else pd.NaT
-    )
+    if expiration_col is not None:
+
+        result["expiration"] = (
+            raw[expiration_col]
+            .apply(
+                normalize_expiration
+            )
+        )
+
+    else:
+
+        result["expiration"] = pd.NaT
 
     result["volume"] = numeric_series(
         raw,
@@ -478,19 +532,25 @@ def prepare_data(raw):
         iv_col,
     )
 
-    result["current_price"] = numeric_series(
-        raw,
-        price_col,
+    result["current_price"] = (
+        numeric_series(
+            raw,
+            price_col,
+        )
     )
 
-    result["flow_score"] = numeric_series(
-        raw,
-        flow_score_col,
+    result["flow_score"] = (
+        numeric_series(
+            raw,
+            flow_score_col,
+        )
     )
 
-    result["directional_premium"] = numeric_series(
-        raw,
-        directional_premium_col,
+    result["directional_premium"] = (
+        numeric_series(
+            raw,
+            directional_premium_col,
+        )
     )
 
     return result
@@ -508,7 +568,8 @@ def build_special_candidates(df):
 
     calls = df[
         (df["option_type"] == "CALL")
-        & (df["side"] == "BUY")
+        &
+        (df["side"] == "BUY")
     ].copy()
 
     # --------------------------------------------------------
@@ -517,7 +578,8 @@ def build_special_candidates(df):
 
     puts = df[
         (df["option_type"] == "PUT")
-        & (df["side"] == "SELL")
+        &
+        (df["side"] == "SELL")
     ].copy()
 
     log(
@@ -547,12 +609,7 @@ def build_special_candidates(df):
         return pd.DataFrame()
 
     # --------------------------------------------------------
-    # Pair CALL BUY and PUT SELL
-    #
-    # IMPORTANT:
-    # Do NOT simply aggregate by ticker.
-    #
-    # We first create individual option pairs.
+    # Individual option pairing
     # --------------------------------------------------------
 
     calls["_pair_key"] = 1
@@ -622,14 +679,7 @@ def build_special_candidates(df):
         return pd.DataFrame()
 
     # --------------------------------------------------------
-    # Strike relationship
-    #
-    # CALL BUY + PUT SELL is considered stronger when:
-    #
-    # PUT strike <= current price
-    # CALL strike >= current price
-    #
-    # This resembles a bullish directional structure.
+    # Current price
     # --------------------------------------------------------
 
     pairs["current_price"] = (
@@ -638,6 +688,16 @@ def build_special_candidates(df):
             pairs["current_price_put"]
         )
     )
+
+    # --------------------------------------------------------
+    # Strike relationship
+    #
+    # CALL BUY:
+    # strike >= current price
+    #
+    # PUT SELL:
+    # strike <= current price
+    # --------------------------------------------------------
 
     pairs["call_bullish_strike"] = (
         pairs["strike_call"]
@@ -651,22 +711,14 @@ def build_special_candidates(df):
 
     # --------------------------------------------------------
     # Delta confirmation
-    #
-    # CALL BUY:
-    # delta > 0
-    #
-    # PUT SELL:
-    # delta < 0
     # --------------------------------------------------------
 
     pairs["call_delta_bullish"] = (
-        pairs["delta_call"]
-        > 0
+        pairs["delta_call"] > 0
     )
 
     pairs["put_delta_bullish"] = (
-        pairs["delta_put"]
-        < 0
+        pairs["delta_put"] < 0
     )
 
     # --------------------------------------------------------
@@ -732,22 +784,29 @@ def build_special_candidates(df):
     # COMPONENT SCORES
     # ========================================================
 
-    pairs["premium_score"] = minmax_score(
-        pairs["combined_premium"]
-    )
-
-    pairs["volume_score"] = minmax_score(
-        pairs["combined_volume"]
-    )
-
-    pairs["flow_score_component"] = minmax_score(
-        (
-            pairs["flow_score_call"]
-            .fillna(0)
-            + pairs["flow_score_put"]
-            .fillna(0)
+    pairs["premium_score"] = (
+        minmax_score(
+            pairs["combined_premium"]
         )
-        / 2.0
+    )
+
+    pairs["volume_score"] = (
+        minmax_score(
+            pairs["combined_volume"]
+        )
+    )
+
+    pairs["flow_score_component"] = (
+        minmax_score(
+            (
+                pairs["flow_score_call"]
+                .fillna(0)
+                +
+                pairs["flow_score_put"]
+                .fillna(0)
+            )
+            / 2.0
+        )
     )
 
     # --------------------------------------------------------
@@ -755,14 +814,23 @@ def build_special_candidates(df):
     # --------------------------------------------------------
 
     pairs["expiry_alignment_score"] = np.where(
+
         pairs["expiration_distance"] <= 1,
+
         100.0,
+
         np.where(
+
             pairs["expiration_distance"] <= 3,
+
             80.0,
+
             np.where(
+
                 pairs["expiration_distance"] <= 7,
+
                 60.0,
+
                 0.0,
             ),
         ),
@@ -773,8 +841,13 @@ def build_special_candidates(df):
     # --------------------------------------------------------
 
     pairs["direction_score"] = (
-        pairs["call_delta_bullish"].astype(int)
-        + pairs["put_delta_bullish"].astype(int)
+        pairs[
+            "call_delta_bullish"
+        ].astype(int)
+        +
+        pairs[
+            "put_delta_bullish"
+        ].astype(int)
     ) * 50.0
 
     # --------------------------------------------------------
@@ -782,8 +855,13 @@ def build_special_candidates(df):
     # --------------------------------------------------------
 
     pairs["strike_score"] = (
-        pairs["call_bullish_strike"].astype(int)
-        + pairs["put_bullish_strike"].astype(int)
+        pairs[
+            "call_bullish_strike"
+        ].astype(int)
+        +
+        pairs[
+            "put_bullish_strike"
+        ].astype(int)
     ) * 50.0
 
     # ========================================================
@@ -798,12 +876,24 @@ def build_special_candidates(df):
     # ========================================================
 
     pairs["special_score"] = (
-        pairs["premium_score"] * 0.30
-        + pairs["volume_score"] * 0.20
-        + pairs["flow_score_component"] * 0.20
-        + pairs["direction_score"] * 0.15
-        + pairs["strike_score"] * 0.10
-        + pairs["expiry_alignment_score"] * 0.05
+
+        pairs["premium_score"]
+        * 0.30
+
+        + pairs["volume_score"]
+        * 0.20
+
+        + pairs["flow_score_component"]
+        * 0.20
+
+        + pairs["direction_score"]
+        * 0.15
+
+        + pairs["strike_score"]
+        * 0.10
+
+        + pairs["expiry_alignment_score"]
+        * 0.05
     )
 
     # --------------------------------------------------------
@@ -812,7 +902,8 @@ def build_special_candidates(df):
 
     pairs["structure_confirmation"] = (
         pairs["call_delta_bullish"]
-        & pairs["put_delta_bullish"]
+        &
+        pairs["put_delta_bullish"]
     )
 
     # --------------------------------------------------------
@@ -824,16 +915,19 @@ def build_special_candidates(df):
     )
 
     pairs["special_reason"] = np.where(
+
         pairs["structure_confirmation"],
-        "CALL BUY confirmed | "
-        "PUT SELL confirmed | "
+
+        "CALL BUY estimated | "
+        "PUT SELL estimated | "
         "Bullish delta confirmation",
-        "CALL BUY confirmed | "
-        "PUT SELL confirmed",
+
+        "CALL BUY estimated | "
+        "PUT SELL estimated",
     )
 
     # --------------------------------------------------------
-    # Prefer actual directional structures
+    # Require delta confirmation
     # --------------------------------------------------------
 
     pairs = pairs[
@@ -844,7 +938,7 @@ def build_special_candidates(df):
         return pd.DataFrame()
 
     # --------------------------------------------------------
-    # Remove duplicate ticker / identical pair
+    # Remove duplicate identical pair
     # --------------------------------------------------------
 
     pairs = pairs.sort_values(
@@ -870,7 +964,7 @@ def build_special_candidates(df):
     )
 
     # --------------------------------------------------------
-    # Rank globally
+    # Global ranking
     # --------------------------------------------------------
 
     pairs = pairs.sort_values(
@@ -885,9 +979,7 @@ def build_special_candidates(df):
     )
 
     # --------------------------------------------------------
-    # Keep maximum one best structure per ticker
-    #
-    # This prevents one ticker from taking all TOP 20 slots.
+    # Maximum one best structure per ticker
     # --------------------------------------------------------
 
     pairs = pairs.drop_duplicates(
@@ -900,7 +992,9 @@ def build_special_candidates(df):
     ).copy()
 
     pairs["special_rank"] = (
-        np.arange(len(pairs))
+        np.arange(
+            len(pairs)
+        )
         + 1
     )
 
@@ -912,6 +1006,7 @@ def build_special_candidates(df):
 # ============================================================
 
 OUTPUT_COLUMNS = [
+
     "special_rank",
     "ticker",
     "structure",
@@ -972,6 +1067,7 @@ def create_empty_output():
 def format_output(pairs):
 
     if pairs is None or pairs.empty:
+
         return create_empty_output()
 
     output = pd.DataFrame()
@@ -1007,7 +1103,9 @@ def format_output(pairs):
 
     output["call_expiration"] = (
         pairs["expiration_call"]
-        .dt.strftime("%Y-%m-%d")
+        .dt.strftime(
+            "%Y-%m-%d"
+        )
     )
 
     output["call_DTE"] = (
@@ -1056,7 +1154,9 @@ def format_output(pairs):
 
     output["put_expiration"] = (
         pairs["expiration_put"]
-        .dt.strftime("%Y-%m-%d")
+        .dt.strftime(
+            "%Y-%m-%d"
+        )
     )
 
     output["put_DTE"] = (
@@ -1096,7 +1196,7 @@ def format_output(pairs):
     )
 
     # --------------------------------------------------------
-    # Combined
+    # COMBINED
     # --------------------------------------------------------
 
     output["combined_premium"] = (
@@ -1148,6 +1248,13 @@ def create_markdown(df):
 
     lines.append(
         "## CALL BUY + PUT SELL"
+    )
+
+    lines.append("")
+
+    lines.append(
+        "**SIDE SOURCE: "
+        "ESTIMATED from bid/ask/lastPrice**"
     )
 
     lines.append("")
@@ -1212,9 +1319,18 @@ def create_markdown(df):
             f"- Special Score: **{score:.2f}**"
         )
 
-        if pd.notna(current_price):
+        lines.append(
+            "- 방향 판정: "
+            "**ESTIMATED**"
+        )
+
+        if pd.notna(
+            current_price
+        ):
+
             lines.append(
-                f"- 현재가: **{current_price:.2f}**"
+                f"- 현재가: "
+                f"**{current_price:.2f}**"
             )
 
         lines.append("")
@@ -1224,7 +1340,8 @@ def create_markdown(df):
         )
 
         lines.append(
-            f"- Strike: {row['call_strike']}"
+            f"- Strike: "
+            f"{row['call_strike']}"
         )
 
         lines.append(
@@ -1233,23 +1350,28 @@ def create_markdown(df):
         )
 
         lines.append(
-            f"- DTE: {row['call_DTE']}"
+            f"- DTE: "
+            f"{row['call_DTE']}"
         )
 
         lines.append(
-            f"- Volume: {row['call_volume']}"
+            f"- Volume: "
+            f"{row['call_volume']}"
         )
 
         lines.append(
-            f"- OI: {row['call_open_interest']}"
+            f"- OI: "
+            f"{row['call_open_interest']}"
         )
 
         lines.append(
-            f"- Premium: {row['call_premium']}"
+            f"- Premium: "
+            f"{row['call_premium']}"
         )
 
         lines.append(
-            f"- Delta: {row['call_delta']}"
+            f"- Delta: "
+            f"{row['call_delta']}"
         )
 
         lines.append("")
@@ -1259,7 +1381,8 @@ def create_markdown(df):
         )
 
         lines.append(
-            f"- Strike: {row['put_strike']}"
+            f"- Strike: "
+            f"{row['put_strike']}"
         )
 
         lines.append(
@@ -1268,23 +1391,28 @@ def create_markdown(df):
         )
 
         lines.append(
-            f"- DTE: {row['put_DTE']}"
+            f"- DTE: "
+            f"{row['put_DTE']}"
         )
 
         lines.append(
-            f"- Volume: {row['put_volume']}"
+            f"- Volume: "
+            f"{row['put_volume']}"
         )
 
         lines.append(
-            f"- OI: {row['put_open_interest']}"
+            f"- OI: "
+            f"{row['put_open_interest']}"
         )
 
         lines.append(
-            f"- Premium: {row['put_premium']}"
+            f"- Premium: "
+            f"{row['put_premium']}"
         )
 
         lines.append(
-            f"- Delta: {row['put_delta']}"
+            f"- Delta: "
+            f"{row['put_delta']}"
         )
 
         lines.append("")
@@ -1344,10 +1472,13 @@ def main():
     # INPUT CHECK
     # ========================================================
 
-    if not os.path.exists(INPUT_FILE):
+    if not os.path.exists(
+        INPUT_FILE
+    ):
 
         raise FileNotFoundError(
-            f"Input file not found: {INPUT_FILE}"
+            f"Input file not found: "
+            f"{INPUT_FILE}"
         )
 
     log(
@@ -1365,7 +1496,8 @@ def main():
     input_rows = len(raw)
 
     log(
-        f"INPUT ROWS : {input_rows:,}"
+        f"INPUT ROWS : "
+        f"{input_rows:,}"
     )
 
     # ========================================================
@@ -1377,7 +1509,8 @@ def main():
     )
 
     log(
-        f"PREPARED ROWS : {len(df):,}"
+        f"PREPARED ROWS : "
+        f"{len(df):,}"
     )
 
     # ========================================================
@@ -1413,24 +1546,49 @@ def main():
         == ""
     ).sum()
 
+    buy_rows = (
+        df["side"]
+        == "BUY"
+    ).sum()
+
+    sell_rows = (
+        df["side"]
+        == "SELL"
+    ).sum()
+
     log(
-        f"CALL BUY ROWS : {call_buy_rows:,}"
+        f"BUY SIDE ROWS : "
+        f"{buy_rows:,}"
     )
 
     log(
-        f"PUT SELL ROWS : {put_sell_rows:,}"
+        f"SELL SIDE ROWS : "
+        f"{sell_rows:,}"
     )
 
     log(
-        f"UNKNOWN SIDE ROWS : {unknown_side_rows:,}"
+        f"CALL BUY ROWS : "
+        f"{call_buy_rows:,}"
+    )
+
+    log(
+        f"PUT SELL ROWS : "
+        f"{put_sell_rows:,}"
+    )
+
+    log(
+        f"UNKNOWN SIDE ROWS : "
+        f"{unknown_side_rows:,}"
     )
 
     # ========================================================
     # SEARCH
     # ========================================================
 
-    candidates = build_special_candidates(
-        df
+    candidates = (
+        build_special_candidates(
+            df
+        )
     )
 
     # ========================================================
@@ -1473,28 +1631,52 @@ def main():
     # ========================================================
 
     print()
-    print("=" * 72)
-    print("🔎 STEP 11 VALIDATION")
-    print("=" * 72)
 
     print(
-        f"INPUT ROWS       : {input_rows:,}"
+        "=" * 72
     )
 
     print(
-        f"CALL BUY ROWS    : {call_buy_rows:,}"
+        "🔎 STEP 11 VALIDATION"
     )
 
     print(
-        f"PUT SELL ROWS    : {put_sell_rows:,}"
+        "=" * 72
     )
 
     print(
-        f"UNKNOWN SIDE     : {unknown_side_rows:,}"
+        f"INPUT ROWS       : "
+        f"{input_rows:,}"
     )
 
     print(
-        f"SPECIAL ROWS     : {len(output):,}"
+        f"BUY SIDE ROWS    : "
+        f"{buy_rows:,}"
+    )
+
+    print(
+        f"SELL SIDE ROWS   : "
+        f"{sell_rows:,}"
+    )
+
+    print(
+        f"CALL BUY ROWS    : "
+        f"{call_buy_rows:,}"
+    )
+
+    print(
+        f"PUT SELL ROWS    : "
+        f"{put_sell_rows:,}"
+    )
+
+    print(
+        f"UNKNOWN SIDE     : "
+        f"{unknown_side_rows:,}"
+    )
+
+    print(
+        f"SPECIAL ROWS     : "
+        f"{len(output):,}"
     )
 
     print(
@@ -1516,7 +1698,13 @@ def main():
 
     print(
         "SIDE SOURCE      : "
-        "unusual_flow.csv / trade_side_estimate"
+        "unusual_flow.csv / "
+        "trade_side_estimate"
+    )
+
+    print(
+        "SIDE STATUS      : "
+        "ESTIMATED"
     )
 
     print()
@@ -1552,14 +1740,18 @@ def main():
         print()
 
     print(
-        f"CSV              : {OUTPUT_CSV}"
+        f"CSV              : "
+        f"{OUTPUT_CSV}"
     )
 
     print(
-        f"MARKDOWN         : {OUTPUT_MD}"
+        f"MARKDOWN         : "
+        f"{OUTPUT_MD}"
     )
 
-    print("=" * 72)
+    print(
+        "=" * 72
+    )
 
     log(
         "STEP 11 SPECIAL LIST COMPLETE"
@@ -1568,4 +1760,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
