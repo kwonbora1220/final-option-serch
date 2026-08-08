@@ -1,4 +1,4 @@
-```yaml
+
 name: STEP 9 Decision
 
 on:
@@ -252,4 +252,3 @@ jobs:
 
           echo ""
           echo "STEP 9 STATUS : SUCCESS"
-```
