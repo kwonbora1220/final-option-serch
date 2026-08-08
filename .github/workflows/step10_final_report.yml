@@ -10,18 +10,34 @@ jobs:
 
     steps:
 
+      # ============================================================
+      # CHECKOUT
+      # ============================================================
+
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # ============================================================
+      # PYTHON
+      # ============================================================
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
+      # ============================================================
+      # DEPENDENCIES
+      # ============================================================
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+
+      # ============================================================
+      # STEP 10 INPUT CHECK
+      # ============================================================
 
       - name: STEP 10 Input Check
         run: |
@@ -36,6 +52,10 @@ jobs:
 
           ls -lh data/analysis/decision.csv
 
+      # ============================================================
+      # RUN STEP 10
+      # ============================================================
+
       - name: Run STEP 10 Final Report
         run: |
 
@@ -45,6 +65,10 @@ jobs:
 
           python src/10_final_report.py
 
+      # ============================================================
+      # STEP 10 OUTPUT CHECK
+      # ============================================================
+
       - name: STEP 10 Output Check
         run: |
 
@@ -52,37 +76,128 @@ jobs:
           echo "STEP 10 OUTPUT CHECK"
           echo "=========================================="
 
-          test -f data/analysis/final_report.csv
-          test -f data/analysis/final_report.md
+          # --------------------------------------------------------
+          # CSV MUST EXIST
+          # --------------------------------------------------------
 
-          echo "FINAL REPORT FILES : OK"
+          test -f data/analysis/final_report.csv
+
+          echo "FINAL REPORT CSV : OK"
 
           echo ""
           echo "CSV:"
           ls -lh data/analysis/final_report.csv
 
-          echo ""
-          echo "MARKDOWN:"
-          ls -lh data/analysis/final_report.md
+          # --------------------------------------------------------
+          # FINAL REPORT CSV VALIDATION
+          # --------------------------------------------------------
 
           python - <<'PY'
+          import os
           import pandas as pd
 
           csv_file = "data/analysis/final_report.csv"
 
+          if not os.path.exists(csv_file):
+              raise FileNotFoundError(csv_file)
+
           df = pd.read_csv(csv_file)
 
           print()
-          print("ROWS              :", len(df))
-          print("TICKERS           :", df["ticker"].nunique())
+          print("=" * 72)
+          print("STEP 10 CSV VALIDATION")
+          print("=" * 72)
+
+          print(f"ROWS              : {len(df)}")
+
+          if df.empty:
+              raise ValueError(
+                  "final_report.csv is empty"
+              )
+
+          # --------------------------------------------------------
+          # REQUIRED COLUMNS
+          # --------------------------------------------------------
+
+          required_columns = [
+              "ticker",
+              "decision_score",
+              "decision",
+          ]
+
+          missing = [
+              column
+              for column in required_columns
+              if column not in df.columns
+          ]
+
+          if missing:
+              raise ValueError(
+                  "Missing required columns: "
+                  + ", ".join(missing)
+              )
+
+          # --------------------------------------------------------
+          # TICKER VALIDATION
+          # --------------------------------------------------------
+
+          ticker_count = df["ticker"].nunique()
+
           print(
-              "DECISION SCORE    :",
-              df["decision_score"].notna().sum()
+              f"TICKERS           : {ticker_count}"
           )
+
+          if ticker_count == 0:
+              raise ValueError(
+                  "No valid tickers found"
+              )
+
+          # --------------------------------------------------------
+          # DECISION SCORE
+          # --------------------------------------------------------
+
+          decision_score_count = (
+              pd.to_numeric(
+                  df["decision_score"],
+                  errors="coerce"
+              )
+              .notna()
+              .sum()
+          )
+
           print(
-              "DECISION VALID    :",
-              df["decision"].notna().sum()
+              f"DECISION SCORE    : "
+              f"{decision_score_count}"
           )
+
+          if decision_score_count == 0:
+              raise ValueError(
+                  "No valid decision scores found"
+              )
+
+          # --------------------------------------------------------
+          # DECISION
+          # --------------------------------------------------------
+
+          decision_count = (
+              df["decision"]
+              .notna()
+              .sum()
+          )
+
+          print(
+              f"DECISION VALID    : "
+              f"{decision_count}"
+          )
+
+          if decision_count == 0:
+              raise ValueError(
+                  "No valid decisions found"
+              )
+
+          # --------------------------------------------------------
+          # DECISION VALUES
+          # --------------------------------------------------------
 
           print()
           print("DECISION SUMMARY")
@@ -90,13 +205,79 @@ jobs:
 
           print(
               df["decision"]
-              .value_counts()
+              .value_counts(dropna=False)
               .to_string()
           )
 
+          # --------------------------------------------------------
+          # EXPECTED DECISION LABEL CHECK
+          # --------------------------------------------------------
+
+          valid_decisions = {
+              "🟢 진입",
+              "🟡 관망",
+              "🔴 회피",
+          }
+
+          actual_decisions = set(
+              df["decision"]
+              .dropna()
+              .astype(str)
+              .str.strip()
+          )
+
+          unexpected = (
+              actual_decisions
+              - valid_decisions
+          )
+
+          if unexpected:
+
+              raise ValueError(
+                  "Unexpected decision labels: "
+                  + ", ".join(
+                      sorted(unexpected)
+                  )
+              )
+
+          # --------------------------------------------------------
+          # FINAL REPORT PREVIEW
+          # --------------------------------------------------------
+
           print()
+          print("FINAL REPORT PREVIEW")
+          print("----------------------------------------")
+
+          preview_columns = [
+              column
+              for column in [
+                  "rank",
+                  "final_rank",
+                  "ticker",
+                  "decision_score",
+                  "decision",
+              ]
+              if column in df.columns
+          ]
+
+          print(
+              df[preview_columns]
+              .to_string(index=False)
+          )
+
+          # --------------------------------------------------------
+          # SUCCESS
+          # --------------------------------------------------------
+
+          print()
+          print("=" * 72)
           print("FINAL REPORT : OK")
+          print("=" * 72)
           PY
+
+      # ============================================================
+      # SAVE STEP 10 RESULT
+      # ============================================================
 
       - name: Save STEP 10 result to GitHub
         run: |
@@ -109,12 +290,13 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add \
-            data/analysis/final_report.csv \
-            data/analysis/final_report.md
+            data/analysis/final_report.csv
 
           if git diff --cached --quiet; then
 
             echo "No changes to commit."
+            echo "PUSH ATTEMPT : 0"
+            echo "Everything up-to-date"
 
           else
 
@@ -123,13 +305,23 @@ jobs:
 
             echo "PUSH ATTEMPT : 1"
 
-            git pull --rebase origin main
+            # ------------------------------------------------------
+            # Sync remote changes before push
+            # ------------------------------------------------------
 
-            git push
+            git pull \
+              --rebase \
+              origin main
+
+            git push origin main
 
             echo "PUSH SUCCESS"
 
           fi
+
+      # ============================================================
+      # STEP 10 COMPLETE
+      # ============================================================
 
       - name: STEP 10 Complete
         run: |
@@ -138,12 +330,13 @@ jobs:
           echo "🔥 STEP 10 FINAL REPORT COMPLETE"
           echo "=========================================="
 
+          echo ""
           echo "CSV:"
           echo "data/analysis/final_report.csv"
 
           echo ""
-          echo "MARKDOWN:"
-          echo "data/analysis/final_report.md"
+          echo "STEP 10 STATUS : SUCCESS"
 
           echo ""
-          echo "STEP 10 STATUS : SUCCESS"
+          echo "NEXT STEP:"
+          echo "STEP 11 - CALL BUY + PUT SELL STRUCTURE"
