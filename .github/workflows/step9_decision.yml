@@ -22,14 +22,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # STEP 8에서 생성한 structure.csv 다운로드
-      - name: Download STEP 8 structure artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: structure-data
-          path: data/analysis
-
-      - name: Check STEP 9 inputs
+      - name: STEP 9 Input Check
         run: |
           echo "=========================================="
           echo "STEP 9 INPUT CHECK"
@@ -39,23 +32,27 @@ jobs:
           test -f data/analysis/unusual_flow.csv
           test -f data/analysis/top20.csv
 
-          echo
-          echo "STRUCTURE FILE"
-          ls -lh data/analysis/structure.csv
+          echo ""
+          echo "REQUIRED FILES"
+          echo "------------------------------------------"
 
-          echo
-          echo "OTHER INPUT FILES"
-          ls -lh data/analysis/unusual_flow.csv
-          ls -lh data/analysis/top20.csv
+          ls -lh \
+            data/analysis/structure.csv \
+            data/analysis/unusual_flow.csv \
+            data/analysis/top20.csv
 
-          echo
+          echo ""
           echo "INPUT FILES : OK"
 
       - name: Run Decision Engine
         run: |
+          echo "=========================================="
+          echo "STEP 9 DECISION ENGINE"
+          echo "=========================================="
+
           python src/09_decision.py
 
-      - name: Check STEP 9 output
+      - name: STEP 9 Output Check
         run: |
           echo "=========================================="
           echo "STEP 9 OUTPUT CHECK"
@@ -85,6 +82,7 @@ jobs:
 
           print()
           print("DECISION COUNTS")
+          print("------------------------------------------")
 
           print(
               df["decision"].value_counts()
@@ -92,11 +90,33 @@ jobs:
 
           print()
           print("STEP 9 OUTPUT : OK")
+          print("==========================================")
           PY
 
-      - name: Upload STEP 9 decision
-        uses: actions/upload-artifact@v4
-        with:
-          name: option-decision
-          path: data/analysis/decision.csv
+      - name: Save STEP 9 result to GitHub
+        run: |
+          echo "=========================================="
+          echo "SAVE STEP 9 RESULT"
+          echo "=========================================="
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add data/analysis/decision.csv
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Add STEP 9 market stock decision"
+            git push
+          fi
+
+      - name: STEP 9 Complete
+        run: |
+          echo "=========================================="
+          echo "🔥 STEP 9 MARKET STOCK DECISION COMPLETE"
+          echo "=========================================="
+
+          echo "decision.csv saved to:"
+          echo "data/analysis/decision.csv"
 
