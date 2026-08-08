@@ -6,6 +6,10 @@
 # STEP 2+ : OPTION UNIVERSE
 # ============================================================
 
+import io
+import requests
+import pandas as pd
+
 
 # ============================================================
 # STEP 1 MARKET UNIVERSE
@@ -22,11 +26,13 @@ MARKET_UNIVERSE = {
 # ============================================================
 # NASDAQ-100 OPTION UNIVERSE
 #
-# Maintained as a static validated universe so that
-# GitHub Actions does not depend on web-page HTML parsing.
+# Current validated public universe.
 #
-# This list contains the current public Nasdaq-100 stock
-# universe used by the scanner.
+# Nasdaq-100 contains 100 companies but can contain more than
+# 100 securities/tickers because some companies have multiple
+# listed securities.
+#
+# Therefore validation below does NOT require exactly 100.
 # ============================================================
 
 NASDAQ_100_UNIVERSE = [
@@ -185,6 +191,21 @@ MAJOR_ETFS = [
 
 
 # ============================================================
+# HTTP
+# ============================================================
+
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 "
+        "(Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 "
+        "(KHTML, like Gecko) "
+        "Chrome/131.0 Safari/537.36"
+    )
+}
+
+
+# ============================================================
 # SYMBOL CLEANING
 # ============================================================
 
@@ -197,6 +218,15 @@ def clean_symbol(symbol):
         symbol
     ).strip().upper()
 
+    if symbol in {
+        "",
+        "NAN",
+        "NONE",
+        "N/A",
+        "NA",
+    }:
+        return ""
+
     # Yahoo Finance convention
     # BRK.B -> BRK-B
     symbol = symbol.replace(
@@ -208,10 +238,123 @@ def clean_symbol(symbol):
 
 
 # ============================================================
+# LOAD S&P 500
+#
+# This part is retained because the previous GitHub Actions
+# execution already proved that the S&P 500 table is readable.
+# ============================================================
+
+def load_sp500():
+
+    url = (
+        "https://en.wikipedia.org/wiki/"
+        "List_of_S%26P_500_companies"
+    )
+
+    print(
+        "[UNIVERSE] Requesting S&P 500..."
+    )
+
+    response = requests.get(
+        url,
+        headers=HEADERS,
+        timeout=30,
+    )
+
+    response.raise_for_status()
+
+    tables = pd.read_html(
+        io.StringIO(
+            response.text
+        )
+    )
+
+    if not tables:
+
+        raise RuntimeError(
+            "S&P 500 tables were not found."
+        )
+
+    selected_table = None
+    selected_column = None
+
+    for table in tables:
+
+        for column in table.columns:
+
+            column_name = str(
+                column
+            ).strip().lower()
+
+            if column_name == "symbol":
+
+                selected_table = table
+                selected_column = column
+
+                break
+
+        if selected_table is not None:
+            break
+
+    if selected_table is None:
+
+        raise RuntimeError(
+            "S&P 500 Symbol column "
+            "was not found."
+        )
+
+    symbols = []
+
+    for value in selected_table[
+        selected_column
+    ]:
+
+        symbol = clean_symbol(
+            value
+        )
+
+        if symbol:
+
+            symbols.append(
+                symbol
+            )
+
+    symbols = list(
+        dict.fromkeys(
+            symbols
+        )
+    )
+
+    if len(symbols) < 450:
+
+        raise RuntimeError(
+            "S&P 500 extraction returned "
+            f"too few symbols: {len(symbols)}"
+        )
+
+    return symbols
+
+
+# ============================================================
 # BUILD OPTION UNIVERSE
 # ============================================================
 
 def build_option_universe():
+
+    # --------------------------------------------------------
+    # S&P 500
+    # --------------------------------------------------------
+
+    print(
+        "[UNIVERSE] Loading S&P 500..."
+    )
+
+    sp500 = load_sp500()
+
+    print(
+        "[UNIVERSE] S&P 500 : "
+        f"{len(sp500)}"
+    )
 
     # --------------------------------------------------------
     # NASDAQ-100
@@ -223,6 +366,11 @@ def build_option_universe():
         if clean_symbol(symbol)
     ]
 
+    print(
+        "[UNIVERSE] NASDAQ-100 : "
+        f"{len(nasdaq100)}"
+    )
+
     # --------------------------------------------------------
     # MAJOR ETFs
     # --------------------------------------------------------
@@ -233,11 +381,35 @@ def build_option_universe():
         if clean_symbol(symbol)
     ]
 
+    print(
+        "[UNIVERSE] MAJOR ETFs : "
+        f"{len(etfs)}"
+    )
+
+    # --------------------------------------------------------
+    # Validate Nasdaq-100
+    #
+    # Do not require exactly 100 because multiple securities
+    # can represent companies in the index.
+    # --------------------------------------------------------
+
+    if len(nasdaq100) < 100:
+
+        raise RuntimeError(
+            "NASDAQ-100 universe is "
+            "unexpectedly small: "
+            f"{len(nasdaq100)}"
+        )
+
     # --------------------------------------------------------
     # Combine
     # --------------------------------------------------------
 
     combined = []
+
+    combined.extend(
+        sp500
+    )
 
     combined.extend(
         nasdaq100
@@ -258,18 +430,10 @@ def build_option_universe():
     )
 
     # --------------------------------------------------------
-    # Validation
+    # Final validation
     # --------------------------------------------------------
 
-    if len(nasdaq100) < 90:
-
-        raise RuntimeError(
-            "NASDAQ-100 universe is "
-            "unexpectedly small: "
-            f"{len(nasdaq100)}"
-        )
-
-    if len(unique_symbols) < 100:
+    if len(unique_symbols) < 500:
 
         raise RuntimeError(
             "Final option universe is "
@@ -277,14 +441,40 @@ def build_option_universe():
             f"{len(unique_symbols)}"
         )
 
+    # --------------------------------------------------------
+    # Summary
+    # --------------------------------------------------------
+
+    overlap_sp500_ndx = len(
+        set(sp500)
+        &
+        set(nasdaq100)
+    )
+
+    print(
+        "[UNIVERSE] S&P 500 + "
+        "NASDAQ-100 + ETFs"
+    )
+
+    print(
+        "[UNIVERSE] S&P 500 TICKERS : "
+        f"{len(sp500)}"
+    )
+
     print(
         "[UNIVERSE] NASDAQ-100 TICKERS : "
         f"{len(nasdaq100)}"
     )
 
     print(
-        "[UNIVERSE] MAJOR ETF TICKERS : "
+        "[UNIVERSE] ETF TICKERS : "
         f"{len(etfs)}"
+    )
+
+    print(
+        "[UNIVERSE] S&P 500 / "
+        "NASDAQ-100 OVERLAP : "
+        f"{overlap_sp500_ndx}"
     )
 
     print(
