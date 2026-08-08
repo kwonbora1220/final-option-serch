@@ -1,0 +1,63 @@
+name: STEP 6 - Top 20 Selection
+
+on:
+  workflow_dispatch:
+
+jobs:
+  top20:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Check STEP 5 Input
+        run: |
+          echo "=========================================="
+          echo "STEP 5 INPUT CHECK"
+          echo "=========================================="
+
+          ls -lh data/analysis/
+
+          python -c "import pandas as pd; df=pd.read_csv('data/analysis/unusual_flow.csv'); print('ROWS       :', len(df)); print('COLUMNS    :', len(df.columns)); print('TICKERS    :', df['symbol'].nunique()); print('FLOW SCORE :', df['flow_score'].notna().sum())"
+
+      - name: Run TOP 20 Engine
+        run: |
+          python src/06_top20.py
+
+      - name: Check TOP 20 Output
+        run: |
+          echo "=========================================="
+          echo "STEP 6 OUTPUT CHECK"
+          echo "=========================================="
+
+          ls -lh data/analysis/
+
+          python -c "import pandas as pd; df=pd.read_csv('data/analysis/top20.csv'); print('TOP20 ROWS :', len(df)); print('TICKERS    :', df['symbol'].nunique()); print('RANK MIN   :', df['rank'].min()); print('RANK MAX   :', df['rank'].max())"
+
+      - name: Save TOP 20 To Repository
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add data/analysis/top20.csv
+
+          git diff --cached --quiet || git commit -m "Add top 20 unusual option flow"
+
+          git push
+
+      - name: Upload TOP 20 Data
+        uses: actions/upload-artifact@v4
+        with:
+          name: top20-data
+          path: data/analysis/top20.csv
