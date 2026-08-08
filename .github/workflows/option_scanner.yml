@@ -1,79 +1,106 @@
 name: Option Flow Scanner V3
 
 on:
-workflow_dispatch:
+  workflow_dispatch:
 
 jobs:
-market-regime:
-runs-on: ubuntu-latest
+  market-regime:
+    runs-on: ubuntu-latest
 
+    steps:
 
-steps:
-  - name: Checkout repository
-    uses: actions/checkout@v4
+      # ============================================================
+      # CHECKOUT
+      # ============================================================
 
-  - name: Setup Python
-    uses: actions/setup-python@v5
-    with:
-      python-version: "3.12"
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-  - name: Install dependencies
-    run: |
-      python -m pip install --upgrade pip
-      pip install -r requirements.txt
+      # ============================================================
+      # PYTHON
+      # ============================================================
 
-  - name: Run Market Regime
-    run: |
-      echo "=========================================="
-      echo "STEP 1 MARKET REGIME"
-      echo "=========================================="
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-      python main.py
+      # ============================================================
+      # DEPENDENCIES
+      # ============================================================
 
-  - name: STEP 1 Output Check
-    run: |
-      echo "=========================================="
-      echo "STEP 1 OUTPUT CHECK"
-      echo "=========================================="
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-      test -f data/analysis/market_regime.csv
+      # ============================================================
+      # STEP 1
+      # ============================================================
 
-      echo ""
-      echo "MARKET REGIME FILE"
-      echo "------------------------------------------"
+      - name: Run Market Regime
+        run: |
+          echo "=========================================="
+          echo "STEP 1 MARKET REGIME"
+          echo "=========================================="
 
-      ls -lh data/analysis/market_regime.csv
+          python main.py
 
-      echo ""
-      cat data/analysis/market_regime.csv
+      # ============================================================
+      # STEP 1 OUTPUT CHECK
+      # ============================================================
 
-      echo ""
-      echo "STEP 1 OUTPUT : OK"
+      - name: STEP 1 Output Check
+        run: |
+          echo "=========================================="
+          echo "STEP 1 OUTPUT CHECK"
+          echo "=========================================="
 
-  - name: Save STEP 1 result to GitHub
-    run: |
-      echo "=========================================="
-      echo "SAVE STEP 1 RESULT"
-      echo "=========================================="
+          test -f data/analysis/market_regime.csv
 
-      git config user.name "github-actions[bot]"
-      git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          echo ""
+          echo "MARKET REGIME FILE"
+          echo "------------------------------------------"
 
-      git add data/analysis/market_regime.csv
+          ls -lh data/analysis/market_regime.csv
 
-      if git diff --cached --quiet; then
-        echo "No changes to commit."
-      else
-        git commit -m "Add STEP 1 market regime"
-        git push
-      fi
+          echo ""
+          cat data/analysis/market_regime.csv
 
-  - name: STEP 1 Complete
-    run: |
-      echo "=========================================="
-      echo "🔥 STEP 1 MARKET REGIME COMPLETE"
-      echo "=========================================="
+          echo ""
+          echo "STEP 1 OUTPUT : OK"
 
-      echo "market_regime.csv saved to:"
-      echo "data/analysis/market_regime.csv"
+      # ============================================================
+      # SAVE STEP 1
+      # ============================================================
 
+      - name: Save STEP 1 result to GitHub
+        run: |
+          echo "=========================================="
+          echo "SAVE STEP 1 RESULT"
+          echo "=========================================="
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add data/analysis/market_regime.csv
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Add STEP 1 market regime"
+            git push
+          fi
+
+      # ============================================================
+      # COMPLETE
+      # ============================================================
+
+      - name: STEP 1 Complete
+        run: |
+          echo "=========================================="
+          echo "🔥 STEP 1 MARKET REGIME COMPLETE"
+          echo "=========================================="
+
+          echo "market_regime.csv saved to:"
+          echo "data/analysis/market_regime.csv"
