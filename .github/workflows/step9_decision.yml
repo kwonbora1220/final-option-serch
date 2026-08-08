@@ -1,10 +1,11 @@
+```yaml
 name: STEP 9 Decision
 
 on:
   workflow_dispatch:
   push:
     paths:
-      - "02_PROGRAM/09_decision.py"
+      - "src/09_decision.py"
       - "data/analysis/market_regime.csv"
       - "data/analysis/structure.csv"
       - "data/analysis/unusual_flow.csv"
@@ -66,8 +67,8 @@ jobs:
           ls -la
 
           echo ""
-          echo "02_PROGRAM"
-          ls -la 02_PROGRAM || true
+          echo "SRC DIRECTORY"
+          ls -la src || true
 
           echo ""
           echo "ANALYSIS DIRECTORY"
@@ -82,6 +83,7 @@ jobs:
           test -f data/analysis/structure.csv
           test -f data/analysis/unusual_flow.csv
           test -f data/analysis/top20.csv
+          test -f src/09_decision.py
 
           echo ""
           echo "STEP 1 MARKET REGIME"
@@ -116,7 +118,7 @@ jobs:
           echo "STEP 9 DECISION"
           echo "=========================================="
 
-          python 02_PROGRAM/09_decision.py
+          python src/09_decision.py
 
       # ============================================================
       # STEP 9 OUTPUT CHECK
@@ -230,7 +232,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "No changes to commit."
           else
-            git commit -m "Add STEP 9 market stock decision"
+            git commit -m "Fix STEP 9 decision workflow path"
             git push
           fi
 
@@ -250,3 +252,4 @@ jobs:
 
           echo ""
           echo "STEP 9 STATUS : SUCCESS"
+```
