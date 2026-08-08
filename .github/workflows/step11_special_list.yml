@@ -1,3 +1,4 @@
+
 name: STEP 11 - Special List
 
 on:
@@ -49,11 +50,49 @@ jobs:
           echo "STEP 11 INPUT CHECK"
           echo "=========================================="
 
-          test -f data/analysis/options_greeks.csv
+          test -f data/analysis/unusual_flow.csv
 
-          echo "OPTIONS GREEKS : OK"
+          echo "UNUSUAL FLOW : OK"
 
-          ls -lh data/analysis/options_greeks.csv
+          ls -lh data/analysis/unusual_flow.csv
+
+          python - <<'PY'
+          import pandas as pd
+
+          file = "data/analysis/unusual_flow.csv"
+
+          df = pd.read_csv(file)
+
+          print()
+          print("ROWS        :", len(df))
+          print("COLUMNS     :", len(df.columns))
+          print("TICKERS     :", df["symbol"].nunique())
+
+          if "trade_side_estimate" in df.columns:
+
+              print(
+                  "BUY EST.    :",
+                  (
+                      df["trade_side_estimate"]
+                      .astype(str)
+                      .str.upper()
+                      .eq("BUY EST.")
+                  ).sum()
+              )
+
+              print(
+                  "SELL EST.   :",
+                  (
+                      df["trade_side_estimate"]
+                      .astype(str)
+                      .str.upper()
+                      .eq("SELL EST.")
+                  ).sum()
+              )
+
+          print()
+          print("STEP 5 DATA : READY")
+          PY
 
 
       # ============================================================
@@ -109,6 +148,7 @@ jobs:
               "SPECIAL SCORE     :",
               df["special_score"].notna().sum()
           )
+
           print(
               "STRUCTURE VALID   :",
               (
@@ -125,12 +165,15 @@ jobs:
           print()
 
           if len(df) == 0:
+
               print(
                   "SPECIAL LIST      : 0"
               )
+
               print(
                   "NO CALL BUY + PUT SELL STRUCTURE"
               )
+
           else:
 
               print(
@@ -148,8 +191,8 @@ jobs:
                   "current_price",
                   "call_strike",
                   "put_strike",
-                  "call_dte",
-                  "put_dte",
+                  "call_DTE",
+                  "put_DTE",
                   "structure",
               ]
 
@@ -183,7 +226,7 @@ jobs:
 
           if git diff --cached --quiet; then
 
-            echo "No changes to commit."
+            echo "NO CHANGES TO COMMIT"
 
           else
 
@@ -192,13 +235,28 @@ jobs:
 
             echo "PUSH ATTEMPT : 1"
 
-            git pull --rebase origin main
+            git fetch origin main
 
-            git push
+            git rebase origin/main
+
+            git push origin HEAD:main
 
             echo "PUSH SUCCESS"
 
           fi
+
+
+      # ============================================================
+      # ARTIFACT
+      # ============================================================
+
+      - name: Upload STEP 11 result
+        uses: actions/upload-artifact@v4
+        with:
+          name: special-list-data
+          path: |
+            data/analysis/special_list.csv
+            data/analysis/special_list.md
 
 
       # ============================================================
@@ -223,6 +281,10 @@ jobs:
           echo ""
           echo "SPECIAL STRUCTURE:"
           echo "CALL BUY + PUT SELL"
+
+          echo ""
+          echo "INPUT:"
+          echo "data/analysis/unusual_flow.csv"
 
           echo ""
           echo "STEP 11 STATUS : SUCCESS"
