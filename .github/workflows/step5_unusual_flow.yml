@@ -10,6 +10,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -52,9 +54,16 @@ jobs:
 
           git add data/analysis/unusual_flow.csv
 
-          git diff --cached --quiet || git commit -m "Add unusual option flow analysis"
+          if git diff --cached --quiet; then
+            echo "NO CHANGES TO COMMIT"
+          else
+            git commit -m "Add unusual option flow analysis"
 
-          git push
+            git fetch origin main
+            git rebase origin/main
+
+            git push origin HEAD:main
+          fi
 
       - name: Upload Unusual Flow Data
         uses: actions/upload-artifact@v4
