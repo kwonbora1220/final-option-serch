@@ -1,15 +1,10 @@
 
 import os
-import math
 from datetime import datetime, timezone
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 
-
-# ============================================================
-# CONFIG
-# ============================================================
 
 BASE_DIR = os.path.dirname(
     os.path.dirname(os.path.abspath(__file__))
@@ -31,20 +26,11 @@ TOP20_FILE = os.path.join(
     "top20.csv"
 )
 
-SEARCH_FILE = os.path.join(
-    ANALYSIS_DIR,
-    "option_search.csv"
-)
-
 OUTPUT_FILE = os.path.join(
     ANALYSIS_DIR,
     "structure.csv"
 )
 
-
-# ============================================================
-# LOG
-# ============================================================
 
 def log(message):
     now = datetime.now(timezone.utc).strftime(
@@ -53,20 +39,35 @@ def log(message):
     print(f"[08 STRUCTURE] {now} | {message}")
 
 
-# ============================================================
-# HELPERS
-# ============================================================
+def find_column(df, candidates):
 
-def first_existing(df, columns, default=np.nan):
-    for col in columns:
-        if col in df.columns:
-            return df[col]
-    return pd.Series(default, index=df.index)
+    normalized = {
+        str(col).strip().lower().replace(" ", "_"): col
+        for col in df.columns
+    }
+
+    for candidate in candidates:
+
+        key = (
+            candidate
+            .strip()
+            .lower()
+            .replace(" ", "_")
+        )
+
+        if key in normalized:
+            return normalized[key]
+
+    return None
 
 
-def numeric_series(df, column, default=np.nan):
-    if column not in df.columns:
-        return pd.Series(default, index=df.index)
+def numeric(df, column):
+
+    if column is None:
+        return pd.Series(
+            np.nan,
+            index=df.index
+        )
 
     return pd.to_numeric(
         df[column],
@@ -74,182 +75,224 @@ def numeric_series(df, column, default=np.nan):
     )
 
 
-def safe_float(value):
-    try:
-        if pd.isna(value):
-            return np.nan
-        return float(value)
-    except Exception:
-        return np.nan
+def prepare_greeks(df):
 
-
-def format_price(value):
-    value = safe_float(value)
-
-    if pd.isna(value):
-        return "UNAVAILABLE"
-
-    return f"${value:,.2f}"
-
-
-def format_number(value):
-    value = safe_float(value)
-
-    if pd.isna(value):
-        return "UNAVAILABLE"
-
-    return f"{value:,.0f}"
-
-
-def format_pct(value):
-    value = safe_float(value)
-
-    if pd.isna(value):
-        return "UNAVAILABLE"
-
-    return f"{value:.2f}%"
-
-
-def normalize_option_type(value):
-    if pd.isna(value):
-        return ""
-
-    text = str(value).upper().strip()
-
-    if text in ("CALL", "C"):
-        return "CALL"
-
-    if text in ("PUT", "P"):
-        return "PUT"
-
-    return text
-
-
-# ============================================================
-# COLUMN NORMALIZATION
-# ============================================================
-
-def prepare_dataframe(df):
-
-    aliases = {
-        "ticker": [
+    ticker_col = find_column(
+        df,
+        [
             "ticker",
-            "Ticker",
             "symbol",
-            "Symbol"
-        ],
-        "option_type": [
-            "option_type",
-            "OptionType",
-            "type",
-            "Type",
-            "contract_type"
-        ],
-        "strike": [
-            "strike",
-            "Strike"
-        ],
-        "expiration": [
-            "expiration",
-            "Expiration",
-            "expiry",
-            "Expiry"
-        ],
-        "dte": [
-            "dte",
-            "DTE"
-        ],
-        "current_price": [
-            "current_price",
-            "Current Price",
-            "underlying_price",
-            "Underlying Price",
-            "spot",
-            "Spot"
-        ],
-        "volume": [
-            "volume",
-            "Volume"
-        ],
-        "open_interest": [
-            "open_interest",
-            "Open Interest",
-            "oi",
-            "OI"
-        ],
-        "premium": [
-            "premium",
-            "Premium",
-            "estimated_traded_premium",
-            "Estimated Traded Premium"
-        ],
-        "gex": [
-            "gex",
-            "GEX"
-        ],
-        "iv": [
-            "iv",
-            "IV",
-            "implied_volatility"
-        ],
-        "delta": [
-            "delta",
-            "Delta"
-        ],
-        "gamma": [
-            "gamma",
-            "Gamma"
-        ],
-        "flow_score": [
-            "flow_score",
-            "Flow Score"
+            "underlying",
+            "underlying_symbol"
         ]
-    }
+    )
+
+    type_col = find_column(
+        df,
+        [
+            "option_type",
+            "type",
+            "contract_type",
+            "call_put"
+        ]
+    )
+
+    strike_col = find_column(
+        df,
+        [
+            "strike",
+            "strike_price"
+        ]
+    )
+
+    price_col = find_column(
+        df,
+        [
+            "current_price",
+            "underlying_price",
+            "spot",
+            "stock_price",
+            "price"
+        ]
+    )
+
+    volume_col = find_column(
+        df,
+        [
+            "volume",
+            "option_volume"
+        ]
+    )
+
+    oi_col = find_column(
+        df,
+        [
+            "open_interest",
+            "oi"
+        ]
+    )
+
+    gex_col = find_column(
+        df,
+        [
+            "gex",
+            "gamma_exposure"
+        ]
+    )
 
     result = pd.DataFrame(index=df.index)
 
-    for target, candidates in aliases.items():
-        result[target] = first_existing(
-            df,
-            candidates
+    if ticker_col is None:
+        raise ValueError(
+            "Ticker column not found in options_greeks.csv"
+        )
+
+    if type_col is None:
+        raise ValueError(
+            "Option type column not found in options_greeks.csv"
+        )
+
+    if strike_col is None:
+        raise ValueError(
+            "Strike column not found in options_greeks.csv"
         )
 
     result["ticker"] = (
-        result["ticker"]
+        df[ticker_col]
         .astype(str)
         .str.upper()
         .str.strip()
     )
 
     result["option_type"] = (
-        result["option_type"]
-        .apply(normalize_option_type)
+        df[type_col]
+        .astype(str)
+        .str.upper()
+        .str.strip()
+        .replace({
+            "C": "CALL",
+            "P": "PUT"
+        })
     )
 
-    for col in [
-        "strike",
-        "dte",
-        "current_price",
-        "volume",
-        "open_interest",
-        "premium",
-        "gex",
-        "iv",
-        "delta",
-        "gamma",
-        "flow_score"
-    ]:
-        result[col] = pd.to_numeric(
-            result[col],
-            errors="coerce"
-        )
+    result["strike"] = numeric(
+        df,
+        strike_col
+    )
+
+    result["current_price"] = numeric(
+        df,
+        price_col
+    )
+
+    result["volume"] = numeric(
+        df,
+        volume_col
+    )
+
+    result["open_interest"] = numeric(
+        df,
+        oi_col
+    )
+
+    result["gex"] = numeric(
+        df,
+        gex_col
+    )
 
     return result
 
 
-# ============================================================
-# WALL CALCULATION
-# ============================================================
+def extract_top20_tickers(df):
+
+    log("Detecting TOP20 ticker column")
+
+    candidates = [
+        "ticker",
+        "symbol",
+        "underlying",
+        "underlying_symbol",
+        "stock",
+        "stock_symbol",
+        "name"
+    ]
+
+    column = find_column(
+        df,
+        candidates
+    )
+
+    if column is None:
+
+        # Last-resort automatic detection:
+        # find a column containing common US ticker-like values.
+
+        for col in df.columns:
+
+            values = (
+                df[col]
+                .dropna()
+                .astype(str)
+                .str.upper()
+                .str.strip()
+            )
+
+            if len(values) == 0:
+                continue
+
+            sample = values.head(20)
+
+            valid = sample.str.match(
+                r"^[A-Z]{1,6}$"
+            ).sum()
+
+            if valid >= max(
+                2,
+                int(len(sample) * 0.5)
+            ):
+
+                column = col
+                break
+
+    if column is None:
+
+        print()
+        print("=" * 72)
+        print("TOP20 AVAILABLE COLUMNS")
+        print("=" * 72)
+
+        for col in df.columns:
+            print(repr(col))
+
+        print("=" * 72)
+
+        raise ValueError(
+            "Unable to identify ticker column in top20.csv"
+        )
+
+    log(
+        f"TOP20 TICKER COLUMN : {column}"
+    )
+
+    tickers = (
+        df[column]
+        .dropna()
+        .astype(str)
+        .str.upper()
+        .str.strip()
+        .tolist()
+    )
+
+    tickers = list(
+        dict.fromkeys(tickers)
+    )
+
+    log(
+        f"TOP20 TICKERS : {len(tickers)}"
+    )
+
+    return tickers
+
 
 def calculate_wall(group, option_type):
 
@@ -264,50 +307,44 @@ def calculate_wall(group, option_type):
     if data.empty:
         return np.nan
 
-    # Priority:
-    # 1. GEX
-    # 2. Open Interest
-    # 3. Volume
-    #
-    # This is a structural estimate,
-    # not an official market-maker wall.
+    data["score"] = 0.0
 
-    data["wall_score"] = 0.0
+    gex = data["gex"].abs().fillna(0)
 
-    if data["gex"].notna().any():
-        data["wall_score"] += (
-            data["gex"].abs().fillna(0)
+    if gex.max() > 0:
+        data["score"] += (
+            gex / gex.max()
         )
 
-    if data["open_interest"].notna().any():
-        oi = data["open_interest"].fillna(0)
+    oi = data["open_interest"].fillna(0)
 
-        if oi.max() > 0:
-            data["wall_score"] += (
-                oi / oi.max()
-            ) * 0.5
+    if oi.max() > 0:
+        data["score"] += (
+            oi / oi.max()
+        ) * 0.5
 
-    if data["volume"].notna().any():
-        volume = data["volume"].fillna(0)
+    volume = data["volume"].fillna(0)
 
-        if volume.max() > 0:
-            data["wall_score"] += (
-                volume / volume.max()
-            ) * 0.25
+    if volume.max() > 0:
+        data["score"] += (
+            volume / volume.max()
+        ) * 0.25
 
-    row = data.sort_values(
-        "wall_score",
-        ascending=False
-    ).iloc[0]
-
-    return row["strike"]
+    return float(
+        data.sort_values(
+            "score",
+            ascending=False
+        ).iloc[0]["strike"]
+    )
 
 
-# ============================================================
-# SUPPORT / RESISTANCE
-# ============================================================
+def calculate_support_resistance(
+    group,
+    current_price
+):
 
-def calculate_support_resistance(group, current_price):
+    if pd.isna(current_price):
+        return np.nan, np.nan
 
     strikes = (
         group["strike"]
@@ -315,11 +352,9 @@ def calculate_support_resistance(group, current_price):
         .unique()
     )
 
-    if len(strikes) == 0 or pd.isna(current_price):
-        return np.nan, np.nan
-
     strikes = sorted(
-        float(x) for x in strikes
+        float(x)
+        for x in strikes
     )
 
     below = [
@@ -332,61 +367,42 @@ def calculate_support_resistance(group, current_price):
         if x > current_price
     ]
 
-    support = max(below) if below else np.nan
-    resistance = min(above) if above else np.nan
+    support = (
+        max(below)
+        if below
+        else np.nan
+    )
+
+    resistance = (
+        min(above)
+        if above
+        else np.nan
+    )
 
     return support, resistance
 
 
-# ============================================================
-# STRUCTURE CLASSIFICATION
-# ============================================================
-
 def classify_structure(
     current_price,
-    call_wall,
-    put_wall,
+    support,
+    resistance,
     net_gex
 ):
 
     if pd.isna(current_price):
         return "UNAVAILABLE"
 
-    bullish = 0
-    bearish = 0
+    if pd.isna(support) or pd.isna(resistance):
+        return "MIXED STRUCTURE"
 
-    if not pd.isna(call_wall):
-        if call_wall > current_price:
-            bullish += 1
+    if net_gex > 0:
+        return "STABILIZED STRUCTURE"
 
-    if not pd.isna(put_wall):
-        if put_wall < current_price:
-            bearish += 1
-
-    if not pd.isna(net_gex):
-
-        if net_gex > 0:
-            # Positive GEX can indicate
-            # more price stabilization.
-            pass
-
-        elif net_gex < 0:
-            # Negative GEX can indicate
-            # greater sensitivity to moves.
-            pass
-
-    if bullish > bearish:
-        return "BULLISH STRUCTURE"
-
-    if bearish > bullish:
-        return "BEARISH STRUCTURE"
+    if net_gex < 0:
+        return "HIGHER VOLATILITY STRUCTURE"
 
     return "MIXED STRUCTURE"
 
-
-# ============================================================
-# MAIN
-# ============================================================
 
 def main():
 
@@ -394,22 +410,22 @@ def main():
 
     if not os.path.exists(GREEKS_FILE):
         raise FileNotFoundError(
-            f"Missing file: {GREEKS_FILE}"
+            GREEKS_FILE
         )
 
     if not os.path.exists(TOP20_FILE):
         raise FileNotFoundError(
-            f"Missing file: {TOP20_FILE}"
+            TOP20_FILE
         )
 
     log("Loading Greeks data")
 
-    greeks = pd.read_csv(
+    greeks_raw = pd.read_csv(
         GREEKS_FILE
     )
 
     log(
-        f"GREEKS ROWS : {len(greeks):,}"
+        f"GREEKS ROWS : {len(greeks_raw):,}"
     )
 
     log("Loading TOP20")
@@ -418,68 +434,53 @@ def main():
         TOP20_FILE
     )
 
-    if "ticker" in top20.columns:
-        top_tickers = (
-            top20["ticker"]
-            .astype(str)
-            .str.upper()
-            .str.strip()
-            .tolist()
-        )
-
-    elif "Ticker" in top20.columns:
-        top_tickers = (
-            top20["Ticker"]
-            .astype(str)
-            .str.upper()
-            .str.strip()
-            .tolist()
-        )
-
-    else:
-        raise ValueError(
-            "TOP20 ticker column not found"
-        )
-
     log(
-        f"TOP20 TICKERS : {len(top_tickers)}"
+        f"TOP20 ROWS : {len(top20)}"
     )
 
-    df = prepare_dataframe(
-        greeks
+    top_tickers = extract_top20_tickers(
+        top20
     )
 
-    df = df[
-        df["ticker"].isin(top_tickers)
+    greeks = prepare_greeks(
+        greeks_raw
+    )
+
+    greeks = greeks[
+        greeks["ticker"].isin(
+            top_tickers
+        )
     ].copy()
 
-    if df.empty:
+    if greeks.empty:
         raise ValueError(
-            "No matching TOP20 option data found"
+            "No TOP20 option data matched"
         )
 
     rows = []
 
     for ticker in top_tickers:
 
-        group = df[
-            df["ticker"] == ticker
+        group = greeks[
+            greeks["ticker"] == ticker
         ].copy()
 
         if group.empty:
+            log(
+                f"{ticker} | NO OPTION DATA"
+            )
             continue
 
-        current_prices = (
+        prices = (
             group["current_price"]
             .dropna()
         )
 
-        if current_prices.empty:
-            current_price = np.nan
-        else:
-            current_price = (
-                current_prices.iloc[0]
-            )
+        current_price = (
+            prices.iloc[0]
+            if not prices.empty
+            else np.nan
+        )
 
         call_wall = calculate_wall(
             group,
@@ -498,21 +499,19 @@ def main():
             )
         )
 
-        call_data = group[
-            group["option_type"] == "CALL"
-        ].copy()
-
-        put_data = group[
-            group["option_type"] == "PUT"
-        ].copy()
-
         call_gex = (
-            call_data["gex"]
+            group.loc[
+                group["option_type"] == "CALL",
+                "gex"
+            ]
             .sum(min_count=1)
         )
 
         put_gex = (
-            put_data["gex"]
+            group.loc[
+                group["option_type"] == "PUT",
+                "gex"
+            ]
             .sum(min_count=1)
         )
 
@@ -528,8 +527,8 @@ def main():
 
         structure = classify_structure(
             current_price,
-            call_wall,
-            put_wall,
+            support,
+            resistance,
             net_gex
         )
 
@@ -561,13 +560,16 @@ def main():
 
         log(
             f"{ticker} | "
-            f"CALL WALL {format_price(call_wall)} | "
-            f"PUT WALL {format_price(put_wall)} | "
-            f"NET GEX {net_gex:,.2f} | "
+            f"PRICE {current_price} | "
+            f"CALL WALL {call_wall} | "
+            f"PUT WALL {put_wall} | "
+            f"NET GEX {net_gex:.4f} | "
             f"{structure}"
         )
 
-    output = pd.DataFrame(rows)
+    output = pd.DataFrame(
+        rows
+    )
 
     os.makedirs(
         ANALYSIS_DIR,
@@ -579,25 +581,24 @@ def main():
         index=False
     )
 
-    # ========================================================
-    # VALIDATION
-    # ========================================================
-
     print()
     print("=" * 72)
     print("🔎 STEP 8 VALIDATION")
     print("=" * 72)
 
     print(
-        f"INPUT GREEKS ROWS : {len(greeks):,}"
+        f"INPUT GREEKS ROWS : "
+        f"{len(greeks_raw):,}"
     )
 
     print(
-        f"TOP20 TICKERS     : {len(top_tickers)}"
+        f"TOP20 TICKERS     : "
+        f"{len(top_tickers)}"
     )
 
     print(
-        f"STRUCTURE ROWS    : {len(output)}"
+        f"STRUCTURE ROWS    : "
+        f"{len(output)}"
     )
 
     print(
@@ -606,42 +607,28 @@ def main():
     )
 
     print(
-        "CALL WALL          : "
-        + str(
-            output["call_wall"]
-            .notna()
-            .sum()
-        )
-        + " VALID"
+        "CALL WALL VALID   : "
+        f"{output['call_wall'].notna().sum()}"
     )
 
     print(
-        "PUT WALL           : "
-        + str(
-            output["put_wall"]
-            .notna()
-            .sum()
-        )
-        + " VALID"
+        "PUT WALL VALID    : "
+        f"{output['put_wall'].notna().sum()}"
     )
 
     print(
-        "NET GEX            : "
-        + str(
-            output["net_gex"]
-            .notna()
-            .sum()
-        )
-        + " VALID"
+        "NET GEX VALID     : "
+        f"{output['net_gex'].notna().sum()}"
     )
 
     print(
-        "STRUCTURE          : OK"
+        "STRUCTURE VALID   : "
+        f"{output['structure'].notna().sum()}"
     )
 
     print(
-        f"OUTPUT FILE        : "
-        f"data/analysis/structure.csv"
+        "OUTPUT FILE       : "
+        "data/analysis/structure.csv"
     )
 
     print("=" * 72)
@@ -653,3 +640,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
