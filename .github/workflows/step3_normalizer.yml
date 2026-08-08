@@ -21,24 +21,42 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Download STEP 2 raw data
-        uses: actions/download-artifact@v4
-        with:
-          name: option-raw-data
-          path: data/raw
-
-      - name: Check raw data
+      - name: Check STEP 2 Raw Data
         run: |
-          echo "Checking STEP 2 data..."
-          ls -lh data/raw
-          echo "--------------------------------"
-          python -c "import pandas as pd; df=pd.read_csv('data/raw/options_raw.csv'); print('ROWS:', len(df)); print('COLUMNS:', len(df.columns)); print('DTE:', df['DTE'].min(), '~', df['DTE'].max())"
+          echo "=========================================="
+          echo "STEP 2 RAW DATA CHECK"
+          echo "=========================================="
+
+          ls -lh data/raw/
+
+          python -c "import pandas as pd; df=pd.read_csv('data/raw/options_raw.csv'); print('ROWS       :', len(df)); print('TICKERS    :', df['symbol'].nunique()); print('DTE MIN    :', df['DTE'].min()); print('DTE MAX    :', df['DTE'].max())"
 
       - name: Run Data Normalizer
         run: |
           python src/03_normalizer.py
 
-      - name: Upload normalized data
+      - name: Check Normalized Data
+        run: |
+          echo "=========================================="
+          echo "STEP 3 OUTPUT CHECK"
+          echo "=========================================="
+
+          ls -lh data/normalized/
+
+          python -c "import pandas as pd; df=pd.read_csv('data/normalized/options_normalized.csv'); print('ROWS       :', len(df)); print('COLUMNS    :', len(df.columns)); print('TICKERS    :', df['symbol'].nunique()); print('DTE MIN    :', df['DTE'].min()); print('DTE MAX    :', df['DTE'].max())"
+
+      - name: Save Normalized Data To Repository
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add data/normalized/options_normalized.csv
+
+          git diff --cached --quiet || git commit -m "Update normalized option data"
+
+          git push
+
+      - name: Upload Normalized Data
         uses: actions/upload-artifact@v4
         with:
           name: option-normalized-data
