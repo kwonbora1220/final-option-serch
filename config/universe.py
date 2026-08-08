@@ -65,7 +65,7 @@ MAJOR_ETFS = [
 
 
 # ============================================================
-# HTTP
+# HTTP SETTINGS
 # ============================================================
 
 HEADERS = {
@@ -75,7 +75,14 @@ HEADERS = {
         "AppleWebKit/537.36 "
         "(KHTML, like Gecko) "
         "Chrome/131.0 Safari/537.36"
-    )
+    ),
+    "Accept": (
+        "text/html,application/xhtml+xml,"
+        "application/xml;q=0.9,*/*;q=0.8"
+    ),
+    "Accept-Language": (
+        "en-US,en;q=0.9"
+    ),
 }
 
 
@@ -101,7 +108,7 @@ def clean_symbol(symbol):
     }:
         return ""
 
-    # Wikipedia can contain footnote markers.
+    # Remove Wikipedia-style footnotes
     symbol = re.sub(
         r"\[[^\]]*\]",
         "",
@@ -117,7 +124,6 @@ def clean_symbol(symbol):
         "-",
     )
 
-    # Remove spaces
     symbol = symbol.replace(
         " ",
         "",
@@ -135,23 +141,12 @@ def is_valid_ticker(symbol):
     if not symbol:
         return False
 
-    # Normal US equity / ETF ticker.
-    #
-    # Allow:
-    # AAPL
-    # BRK-B
-    # BF-B
-    # etc.
-    #
-    # Reject long text such as company names.
-
-    if not re.fullmatch(
-        r"[A-Z0-9]{1,5}(?:-[A-Z0-9]{1,2})?",
-        symbol,
-    ):
-        return False
-
-    return True
+    return bool(
+        re.fullmatch(
+            r"[A-Z0-9]{1,5}(?:-[A-Z0-9]{1,2})?",
+            symbol,
+        )
+    )
 
 
 # ============================================================
@@ -189,32 +184,21 @@ def load_sp500():
             "S&P 500 tables were not found."
         )
 
-    # --------------------------------------------------------
-    # Find table containing Symbol column
-    # --------------------------------------------------------
-
     selected_table = None
     selected_column = None
 
     for table in tables:
 
-        columns = [
-            str(column)
-            .strip()
-            .lower()
-            for column in table.columns
-        ]
+        for column in table.columns:
 
-        for index, column in enumerate(
-            columns
-        ):
+            column_name = str(
+                column
+            ).strip().lower()
 
-            if column == "symbol":
+            if column_name == "symbol":
 
                 selected_table = table
-                selected_column = (
-                    table.columns[index]
-                )
+                selected_column = column
 
                 break
 
@@ -238,20 +222,25 @@ def load_sp500():
             value
         )
 
-        if is_valid_ticker(symbol):
+        if is_valid_ticker(
+            symbol
+        ):
 
             symbols.append(
                 symbol
             )
 
     symbols = list(
-        dict.fromkeys(symbols)
+        dict.fromkeys(
+            symbols
+        )
     )
 
-    if not symbols:
+    if len(symbols) < 450:
 
         raise RuntimeError(
-            "S&P 500 ticker list is empty."
+            "S&P 500 extraction returned "
+            f"too few symbols: {len(symbols)}"
         )
 
     return symbols
@@ -259,47 +248,67 @@ def load_sp500():
 
 # ============================================================
 # LOAD NASDAQ 100
+#
+# Official Nasdaq page
 # ============================================================
 
 def load_nasdaq100():
 
     url = (
-        "https://en.wikipedia.org/wiki/"
-        "Nasdaq-100"
+        "https://www.nasdaq.com/"
+        "solutions/nasdaq-100/companies"
     )
 
     print(
-        "[UNIVERSE] Requesting Nasdaq 100..."
+        "[UNIVERSE] Requesting "
+        "Nasdaq-100 official page..."
     )
 
     response = requests.get(
         url,
         headers=HEADERS,
-        timeout=30,
+        timeout=45,
     )
 
     response.raise_for_status()
 
-    tables = pd.read_html(
-        io.StringIO(
-            response.text
-        )
+    html = response.text
+
+    print(
+        "[UNIVERSE] Nasdaq page size : "
+        f"{len(html):,} bytes"
     )
 
-    if not tables:
+    if len(html) < 10000:
 
         raise RuntimeError(
-            "Nasdaq 100 tables were not found."
+            "Nasdaq page response is "
+            "unexpectedly small."
         )
 
     symbols = []
 
     # --------------------------------------------------------
-    # Examine every table.
+    # Method 1
     #
-    # Wikipedia has changed table layouts over time.
-    # Do not depend on one exact column name.
+    # Parse HTML tables if the page exposes
+    # the company table directly.
     # --------------------------------------------------------
+
+    try:
+
+        tables = pd.read_html(
+            io.StringIO(html)
+        )
+
+    except Exception:
+
+        tables = []
+
+    print(
+        "[UNIVERSE] Nasdaq HTML tables : "
+        f"{len(tables)}"
+    )
 
     for table_index, table in enumerate(
         tables
@@ -311,168 +320,116 @@ def load_nasdaq100():
             f"{list(table.columns)}"
         )
 
-        # ----------------------------------------------------
-        # Flatten MultiIndex columns if necessary.
-        # ----------------------------------------------------
-
-        column_map = {}
-
         for column in table.columns:
 
-            if isinstance(
-                column,
-                tuple,
-            ):
+            column_name = str(
+                column
+            ).strip().lower()
 
-                parts = [
-                    str(part).strip()
-                    for part in column
-                ]
+            if column_name not in {
+                "symbol",
+                "ticker",
+                "ticker symbol",
+            }:
+                continue
 
-                column_name = " ".join(
-                    part
-                    for part in parts
-                    if part
-                    and part.lower()
-                    != "nan"
+            for value in table[
+                column
+            ]:
+
+                symbol = clean_symbol(
+                    value
                 )
 
-            else:
-
-                column_name = str(
-                    column
-                ).strip()
-
-            column_map[
-                column_name.lower()
-            ] = column
-
-        # ----------------------------------------------------
-        # Candidate ticker columns.
-        # ----------------------------------------------------
-
-        candidate_names = [
-            "ticker",
-            "ticker symbol",
-            "symbol",
-            "ticker/symbol",
-            "ticker symbol (nasdaq)",
-        ]
-
-        selected_column = None
-
-        for candidate in candidate_names:
-
-            if candidate in column_map:
-
-                selected_column = (
-                    column_map[candidate]
-                )
-
-                break
-
-        # ----------------------------------------------------
-        # If exact name not found, inspect
-        # every column for ticker-like content.
-        # ----------------------------------------------------
-
-        if selected_column is None:
-
-            best_column = None
-            best_score = 0
-
-            for column in table.columns:
-
-                values = table[column]
-
-                score = 0
-                checked = 0
-
-                for value in values.head(
-                    min(len(values), 150)
+                if is_valid_ticker(
+                    symbol
                 ):
 
-                    symbol = clean_symbol(
-                        value
-                    )
-
-                    if is_valid_ticker(
+                    symbols.append(
                         symbol
-                    ):
-
-                        score += 1
-
-                    checked += 1
-
-                if checked > 0:
-
-                    ratio = (
-                        score / checked
                     )
 
-                    if (
-                        score >= 10
-                        and ratio >= 0.40
-                        and score > best_score
-                    ):
+    # --------------------------------------------------------
+    # Method 2
+    #
+    # Nasdaq pages can embed the component
+    # data in JSON / JavaScript.
+    #
+    # Search for quoted ticker-like values.
+    # --------------------------------------------------------
 
-                        best_column = column
-                        best_score = score
-
-            selected_column = best_column
-
-        if selected_column is None:
-            continue
+    if len(
+        list(
+            dict.fromkeys(symbols)
+        )
+    ) < 80:
 
         print(
-            "[UNIVERSE] NASDAQ TICKER "
-            "COLUMN FOUND : "
-            f"{selected_column}"
+            "[UNIVERSE] HTML table extraction "
+            "was insufficient."
         )
 
-        # ----------------------------------------------------
-        # Extract ticker values.
-        # ----------------------------------------------------
+        # Look for common JSON fields.
+        patterns = [
+            r'"symbol"\s*:\s*"([A-Z][A-Z0-9.-]{0,5})"',
+            r'"ticker"\s*:\s*"([A-Z][A-Z0-9.-]{0,5})"',
+            r'"Symbol"\s*:\s*"([A-Z][A-Z0-9.-]{0,5})"',
+            r'"Ticker"\s*:\s*"([A-Z][A-Z0-9.-]{0,5})"',
+        ]
 
-        for value in table[
-            selected_column
-        ]:
+        for pattern in patterns:
 
-            symbol = clean_symbol(
-                value
+            matches = re.findall(
+                pattern,
+                html,
             )
 
-            if is_valid_ticker(
-                symbol
-            ):
+            for value in matches:
 
-                symbols.append(
-                    symbol
+                symbol = clean_symbol(
+                    value
                 )
+
+                if is_valid_ticker(
+                    symbol
+                ):
+
+                    symbols.append(
+                        symbol
+                    )
 
     # --------------------------------------------------------
     # Remove duplicates
     # --------------------------------------------------------
 
     symbols = list(
-        dict.fromkeys(symbols)
+        dict.fromkeys(
+            symbols
+        )
     )
 
     # --------------------------------------------------------
-    # Safety check
+    # IMPORTANT SAFETY CHECK
     #
-    # We expect a Nasdaq-100 table to contain
-    # approximately 100 constituents.
-    # If we accidentally extracted a random
-    # column, do not silently continue.
+    # Never allow a partial/random extraction
+    # to silently become the Nasdaq-100 universe.
     # --------------------------------------------------------
 
     if len(symbols) < 80:
 
         raise RuntimeError(
-            "Nasdaq 100 ticker extraction "
-            "returned too few symbols: "
-            f"{len(symbols)}"
+            "Nasdaq-100 extraction failed. "
+            "Only "
+            f"{len(symbols)} valid symbols "
+            "were found."
+        )
+
+    if len(symbols) > 130:
+
+        raise RuntimeError(
+            "Nasdaq-100 extraction returned "
+            "an unexpectedly large universe: "
+            f"{len(symbols)} symbols."
         )
 
     print(
@@ -573,10 +530,12 @@ def build_option_universe():
         f"{len(unique_symbols)}"
     )
 
-    if not unique_symbols:
+    if len(unique_symbols) < 500:
 
         raise RuntimeError(
-            "Option universe is empty."
+            "Final option universe is "
+            "unexpectedly small: "
+            f"{len(unique_symbols)}"
         )
 
     return unique_symbols
