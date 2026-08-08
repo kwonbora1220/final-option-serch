@@ -1,13 +1,11 @@
 import os
-import re
 from datetime import datetime, timezone
 
-import numpy as np
 import pandas as pd
 
 
 # ============================================================
-# CONFIG
+# STEP 10 - FINAL REPORT
 # ============================================================
 
 BASE_DIR = os.path.dirname(
@@ -22,19 +20,19 @@ ANALYSIS_DIR = os.path.join(
     "analysis"
 )
 
-FLOW_FILE = os.path.join(
+INPUT_FILE = os.path.join(
     ANALYSIS_DIR,
-    "unusual_flow.csv"
+    "decision.csv"
 )
 
-TOP20_FILE = os.path.join(
+OUTPUT_CSV = os.path.join(
     ANALYSIS_DIR,
-    "top20.csv"
+    "final_report.csv"
 )
 
-OUTPUT_FILE = os.path.join(
+OUTPUT_MD = os.path.join(
     ANALYSIS_DIR,
-    "special_list.csv"
+    "final_report.md"
 )
 
 
@@ -51,278 +49,7 @@ def log(message):
     )
 
     print(
-        f"[11 SPECIAL LIST] {now} | {message}"
-    )
-
-
-# ============================================================
-# HELPERS
-# ============================================================
-
-def find_column(df, candidates):
-
-    normalized = {
-        str(col)
-        .strip()
-        .lower()
-        .replace(" ", "_")
-        .replace("-", "_"): col
-        for col in df.columns
-    }
-
-    for candidate in candidates:
-
-        key = (
-            candidate
-            .strip()
-            .lower()
-            .replace(" ", "_")
-            .replace("-", "_")
-        )
-
-        if key in normalized:
-            return normalized[key]
-
-    return None
-
-
-def numeric(df, column):
-
-    if column is None:
-
-        return pd.Series(
-            np.nan,
-            index=df.index
-        )
-
-    return pd.to_numeric(
-        df[column],
-        errors="coerce"
-    )
-
-
-# ============================================================
-# NORMALIZE TEXT
-# ============================================================
-
-def clean_text(value):
-
-    if pd.isna(value):
-        return ""
-
-    text = str(value).upper()
-
-    text = (
-        text
-        .replace("_", " ")
-        .replace("-", " ")
-        .replace("/", " ")
-        .replace("+", " + ")
-        .replace(",", " ")
-    )
-
-    text = re.sub(
-        r"\s+",
-        " ",
-        text
-    )
-
-    return text.strip()
-
-
-# ============================================================
-# SIDE DETECTION
-# ============================================================
-
-def detect_side(text):
-
-    text = clean_text(text)
-
-    if (
-        "CALL BUY" in text
-        or "BUY CALL" in text
-        or "CALL BTO" in text
-        or "BTO CALL" in text
-    ):
-
-        call_buy = True
-
-    else:
-
-        call_buy = False
-
-    if (
-        "PUT SELL" in text
-        or "SELL PUT" in text
-        or "PUT STO" in text
-        or "STO PUT" in text
-    ):
-
-        put_sell = True
-
-    else:
-
-        put_sell = False
-
-    if (
-        "PUT BUY" in text
-        or "BUY PUT" in text
-        or "PUT BTO" in text
-        or "BTO PUT" in text
-    ):
-
-        put_buy = True
-
-    else:
-
-        put_buy = False
-
-    if (
-        "CALL SELL" in text
-        or "SELL CALL" in text
-        or "CALL STO" in text
-        or "STO CALL" in text
-    ):
-
-        call_sell = True
-
-    else:
-
-        call_sell = False
-
-    return (
-        call_buy,
-        put_sell,
-        put_buy,
-        call_sell
-    )
-
-
-# ============================================================
-# STRUCTURE CLASSIFICATION
-# ============================================================
-
-def classify_special(text):
-
-    (
-        call_buy,
-        put_sell,
-        put_buy,
-        call_sell
-    ) = detect_side(text)
-
-    # --------------------------------------------------------
-    # PRIORITY 1
-    # --------------------------------------------------------
-
-    if call_buy and put_sell:
-
-        return (
-            "CALL BUY + PUT SELL",
-            100,
-            "BULLISH"
-        )
-
-    # --------------------------------------------------------
-    # PRIORITY 2
-    # --------------------------------------------------------
-
-    if put_buy and call_sell:
-
-        return (
-            "PUT BUY + CALL SELL",
-            100,
-            "BEARISH"
-        )
-
-    # --------------------------------------------------------
-    # CALL BUY + PUT BUY
-    # --------------------------------------------------------
-
-    if call_buy and put_buy:
-
-        return (
-            "CALL BUY + PUT BUY",
-            70,
-            "LONG VOLATILITY"
-        )
-
-    # --------------------------------------------------------
-    # CALL BUY
-    # --------------------------------------------------------
-
-    if call_buy:
-
-        return (
-            "CALL BUY",
-            55,
-            "BULLISH"
-        )
-
-    # --------------------------------------------------------
-    # PUT BUY
-    # --------------------------------------------------------
-
-    if put_buy:
-
-        return (
-            "PUT BUY",
-            55,
-            "BEARISH"
-        )
-
-    # --------------------------------------------------------
-    # CALL SELL + PUT SELL
-    # --------------------------------------------------------
-
-    if call_sell and put_sell:
-
-        return (
-            "CALL SELL + PUT SELL",
-            35,
-            "SHORT VOLATILITY"
-        )
-
-    # --------------------------------------------------------
-    # ROLL
-    # --------------------------------------------------------
-
-    if "ROLL" in text:
-
-        return (
-            "ROLL",
-            10,
-            "ROLL"
-        )
-
-    # --------------------------------------------------------
-    # STRADDLE
-    # --------------------------------------------------------
-
-    if "STRADDLE" in text:
-
-        return (
-            "STRADDLE",
-            10,
-            "VOLATILITY"
-        )
-
-    # --------------------------------------------------------
-    # STRANGLE
-    # --------------------------------------------------------
-
-    if "STRANGLE" in text:
-
-        return (
-            "STRANGLE",
-            10,
-            "VOLATILITY"
-        )
-
-    return (
-        "",
-        0,
-        ""
+        f"[10 FINAL REPORT] {now} | {message}"
     )
 
 
@@ -334,411 +61,175 @@ def main():
 
     log("START")
 
-    if not os.path.exists(
-        FLOW_FILE
-    ):
+    # --------------------------------------------------------
+    # INPUT CHECK
+    # --------------------------------------------------------
+
+    if not os.path.exists(INPUT_FILE):
 
         raise FileNotFoundError(
-            FLOW_FILE
+            f"Decision file not found: {INPUT_FILE}"
         )
 
-    flow = pd.read_csv(
-        FLOW_FILE
+    log(
+        f"INPUT : {INPUT_FILE}"
     )
 
-    top20 = pd.read_csv(
-        TOP20_FILE
+    df = pd.read_csv(
+        INPUT_FILE
     )
 
-    # --------------------------------------------------------
-    # COLUMNS
-    # --------------------------------------------------------
-
-    ticker_col = find_column(
-        flow,
-        [
-            "ticker",
-            "symbol",
-            "underlying"
-        ]
-    )
-
-    if ticker_col is None:
+    if df.empty:
 
         raise ValueError(
-            "Ticker column missing"
+            "decision.csv is empty"
         )
 
-    description_col = find_column(
-        flow,
-        [
-            "structure",
-            "strategy",
-            "flow_type",
-            "trade_type",
-            "transaction_type",
-            "description",
-            "signal",
-            "option_signal"
-        ]
+    log(
+        f"INPUT ROWS : {len(df)}"
     )
 
-    if description_col is None:
+    # --------------------------------------------------------
+    # REQUIRED COLUMNS
+    # --------------------------------------------------------
+
+    required_columns = [
+
+        "ticker",
+        "market_score",
+        "market_regime",
+
+        "ndx_direction",
+        "spy_direction",
+        "soxx_direction",
+        "dia_direction",
+
+        "flow_score",
+
+        "current_price",
+
+        "call_wall",
+        "put_wall",
+
+        "support",
+        "resistance",
+
+        "net_gex",
+
+        "structure",
+
+        "decision_score",
+        "decision",
+
+        "reason",
+
+    ]
+
+    missing = [
+        column
+        for column in required_columns
+        if column not in df.columns
+    ]
+
+    if missing:
 
         raise ValueError(
-            "No structure / strategy column found "
-            "in unusual_flow.csv"
-        )
-
-    premium_col = find_column(
-        flow,
-        [
-            "premium",
-            "estimated_premium",
-            "total_premium",
-            "premium_flow"
-        ]
-    )
-
-    volume_col = find_column(
-        flow,
-        [
-            "volume",
-            "option_volume"
-        ]
-    )
-
-    oi_col = find_column(
-        flow,
-        [
-            "open_interest",
-            "oi"
-        ]
-    )
-
-    expiration_col = find_column(
-        flow,
-        [
-            "expiration",
-            "expiry",
-            "expiration_date"
-        ]
-    )
-
-    strike_col = find_column(
-        flow,
-        [
-            "strike",
-            "strike_price"
-        ]
-    )
-
-    option_type_col = find_column(
-        flow,
-        [
-            "option_type",
-            "type",
-            "call_put"
-        ]
-    )
-
-    flow_score_col = find_column(
-        flow,
-        [
-            "flow_score",
-            "option_flow_score",
-            "score"
-        ]
-    )
-
-    # --------------------------------------------------------
-    # TOP20 TICKERS
-    # --------------------------------------------------------
-
-    top_ticker_col = find_column(
-        top20,
-        [
-            "ticker",
-            "symbol",
-            "underlying",
-            "stock"
-        ]
-    )
-
-    top_tickers = set()
-
-    if top_ticker_col is not None:
-
-        top_tickers = set(
-            top20[
-                top_ticker_col
-            ]
-            .dropna()
-            .astype(str)
-            .str.upper()
-            .str.strip()
-            .tolist()
+            "Missing required columns: "
+            + ", ".join(missing)
         )
 
     # --------------------------------------------------------
-    # BUILD COMBINED TEXT
+    # NUMERIC STANDARDIZATION
     # --------------------------------------------------------
 
-    text_columns = []
+    numeric_columns = [
 
-    for col in [
-        description_col,
-        option_type_col
-    ]:
+        "market_score",
+        "flow_score",
+        "current_price",
 
-        if col is not None:
+        "call_wall",
+        "put_wall",
 
-            text_columns.append(
-                flow[col]
-                .fillna("")
-                .astype(str)
-            )
+        "support",
+        "resistance",
 
-    combined = (
-        pd.Series(
-            "",
-            index=flow.index
+        "net_gex",
+
+        "decision_score",
+
+    ]
+
+    for column in numeric_columns:
+
+        df[column] = pd.to_numeric(
+            df[column],
+            errors="coerce"
+        )
+
+    # --------------------------------------------------------
+    # FINAL SORT
+    # --------------------------------------------------------
+
+    df = (
+        df
+        .sort_values(
+            "decision_score",
+            ascending=False
+        )
+        .reset_index(
+            drop=True
         )
     )
 
-    for series in text_columns:
-
-        combined = (
-            combined
-            + " "
-            + series
-        )
-
-    flow["_combined_text"] = (
-        combined.apply(
-            clean_text
-        )
+    df["final_rank"] = (
+        df.index + 1
     )
 
     # --------------------------------------------------------
-    # CLASSIFY
+    # FINAL REPORT COLUMNS
     # --------------------------------------------------------
 
-    rows = []
+    report_columns = [
 
-    for index, source in flow.iterrows():
+        "final_rank",
+        "ticker",
 
-        ticker = (
-            str(
-                source[ticker_col]
-            )
-            .upper()
-            .strip()
-        )
+        "market_score",
+        "market_regime",
 
-        text = source[
-            "_combined_text"
-        ]
+        "ndx_direction",
+        "spy_direction",
+        "soxx_direction",
+        "dia_direction",
 
-        (
-            structure,
-            special_score,
-            direction
-        ) = classify_special(
-            text
-        )
+        "flow_score",
 
-        if not structure:
+        "current_price",
 
-            continue
+        "call_wall",
+        "put_wall",
 
-        premium = np.nan
+        "support",
+        "resistance",
 
-        if premium_col is not None:
+        "net_gex",
 
-            premium = pd.to_numeric(
-                source[premium_col],
-                errors="coerce"
-            )
+        "structure",
 
-        volume = np.nan
+        "decision_score",
+        "decision",
 
-        if volume_col is not None:
+        "reason",
 
-            volume = pd.to_numeric(
-                source[volume_col],
-                errors="coerce"
-            )
+    ]
 
-        oi = np.nan
-
-        if oi_col is not None:
-
-            oi = pd.to_numeric(
-                source[oi_col],
-                errors="coerce"
-            )
-
-        flow_score = np.nan
-
-        if flow_score_col is not None:
-
-            flow_score = pd.to_numeric(
-                source[flow_score_col],
-                errors="coerce"
-            )
-
-        # ----------------------------------------------------
-        # Quality bonus
-        # ----------------------------------------------------
-
-        quality_score = (
-            float(special_score)
-        )
-
-        if not pd.isna(flow_score):
-
-            quality_score += (
-                min(
-                    20,
-                    max(
-                        0,
-                        flow_score * 0.20
-                    )
-                )
-            )
-
-        if (
-            ticker in top_tickers
-            and ticker != ""
-        ):
-
-            quality_score += 10
-
-        quality_score = min(
-            130,
-            quality_score
-        )
-
-        rows.append({
-
-            "ticker":
-                ticker,
-
-            "special_structure":
-                structure,
-
-            "direction":
-                direction,
-
-            "special_score":
-                special_score,
-
-            "quality_score":
-                quality_score,
-
-            "flow_score":
-                flow_score,
-
-            "premium":
-                premium,
-
-            "volume":
-                volume,
-
-            "open_interest":
-                oi,
-
-            "expiration":
-                (
-                    source[expiration_col]
-                    if expiration_col is not None
-                    else np.nan
-                ),
-
-            "strike":
-                (
-                    source[strike_col]
-                    if strike_col is not None
-                    else np.nan
-                ),
-
-            "option_type":
-                (
-                    source[option_type_col]
-                    if option_type_col is not None
-                    else ""
-                ),
-
-            "top20":
-                ticker in top_tickers,
-
-            "source_text":
-                text,
-
-            "data_source":
-                "CALCULATED"
-
-        })
-
-    output = pd.DataFrame(
-        rows
-    )
+    report = df[
+        report_columns
+    ].copy()
 
     # --------------------------------------------------------
-    # FILTER
-    # --------------------------------------------------------
-
-    if output.empty:
-
-        output = pd.DataFrame(
-            columns=[
-                "ticker",
-                "special_structure",
-                "direction",
-                "special_score",
-                "quality_score",
-                "flow_score",
-                "premium",
-                "volume",
-                "open_interest",
-                "expiration",
-                "strike",
-                "option_type",
-                "top20",
-                "source_text",
-                "data_source"
-            ]
-        )
-
-    else:
-
-        output = (
-            output
-            .sort_values(
-                [
-                    "special_score",
-                    "quality_score",
-                    "flow_score"
-                ],
-                ascending=False
-            )
-            .reset_index(
-                drop=True
-            )
-        )
-
-        output.insert(
-            0,
-            "special_rank",
-            range(
-                1,
-                len(output) + 1
-            )
-        )
-
-    # --------------------------------------------------------
-    # OUTPUT
+    # SAVE CSV
     # --------------------------------------------------------
 
     os.makedirs(
@@ -746,81 +237,472 @@ def main():
         exist_ok=True
     )
 
-    output.to_csv(
-        OUTPUT_FILE,
+    report.to_csv(
+        OUTPUT_CSV,
         index=False
     )
 
-    # ========================================================
-    # VALIDATION
-    # ========================================================
-
-    print()
-    print("=" * 72)
-    print("🔥 STEP 11 SPECIAL LIST VALIDATION")
-    print("=" * 72)
-
-    print(
-        f"FLOW ROWS         : {len(flow):,}"
+    log(
+        f"CSV SAVED : {OUTPUT_CSV}"
     )
 
-    print(
-        f"SPECIAL ROWS      : {len(output):,}"
+    # --------------------------------------------------------
+    # MARKET SUMMARY
+    # --------------------------------------------------------
+
+    latest = report.iloc[0]
+
+    market_score = float(
+        report["market_score"]
+        .dropna()
+        .iloc[0]
     )
 
-    if not output.empty:
+    market_regime = str(
+        report["market_regime"]
+        .iloc[0]
+    )
 
-        print()
+    ndx_direction = str(
+        report["ndx_direction"]
+        .iloc[0]
+    )
 
-        print(
-            "SPECIAL STRUCTURES"
+    spy_direction = str(
+        report["spy_direction"]
+        .iloc[0]
+    )
+
+    soxx_direction = str(
+        report["soxx_direction"]
+        .iloc[0]
+    )
+
+    dia_direction = str(
+        report["dia_direction"]
+        .iloc[0]
+    )
+
+    # --------------------------------------------------------
+    # DECISION COUNTS
+    # --------------------------------------------------------
+
+    entry_count = (
+        report["decision"]
+        == "🟢 진입"
+    ).sum()
+
+    watch_count = (
+        report["decision"]
+        == "🟡 관망"
+    ).sum()
+
+    avoid_count = (
+        report["decision"]
+        == "🔴 회피"
+    ).sum()
+
+    # --------------------------------------------------------
+    # MARKDOWN
+    # --------------------------------------------------------
+
+    generated_at = datetime.now(
+        timezone.utc
+    ).strftime(
+        "%Y-%m-%d %H:%M:%S UTC"
+    )
+
+    lines = []
+
+    lines.append(
+        "# 🇺🇸 US OPTIONS FINAL REPORT"
+    )
+
+    lines.append("")
+
+    lines.append(
+        f"Generated: {generated_at}"
+    )
+
+    lines.append("")
+
+    # --------------------------------------------------------
+    # MARKET
+    # --------------------------------------------------------
+
+    lines.append(
+        "## 1. MARKET REGIME"
+    )
+
+    lines.append("")
+
+    lines.append(
+        f"- Market Score: **{market_score:.2f}**"
+    )
+
+    lines.append(
+        f"- Market Regime: **{market_regime}**"
+    )
+
+    lines.append(
+        f"- NDX: **{ndx_direction}**"
+    )
+
+    lines.append(
+        f"- SPY: **{spy_direction}**"
+    )
+
+    lines.append(
+        f"- SOXX: **{soxx_direction}**"
+    )
+
+    lines.append(
+        f"- DIA: **{dia_direction}**"
+    )
+
+    lines.append("")
+
+    # --------------------------------------------------------
+    # DECISION SUMMARY
+    # --------------------------------------------------------
+
+    lines.append(
+        "## 2. DECISION SUMMARY"
+    )
+
+    lines.append("")
+
+    lines.append(
+        f"- 🟢 진입: **{entry_count}**"
+    )
+
+    lines.append(
+        f"- 🟡 관망: **{watch_count}**"
+    )
+
+    lines.append(
+        f"- 🔴 회피: **{avoid_count}**"
+    )
+
+    lines.append("")
+
+    # --------------------------------------------------------
+    # TOP DECISIONS
+    # --------------------------------------------------------
+
+    lines.append(
+        "## 3. TOP DECISIONS"
+    )
+
+    lines.append("")
+
+    lines.append(
+        "| Rank | Ticker | Decision Score | Flow | Price | Decision |"
+    )
+
+    lines.append(
+        "|---:|---|---:|---:|---:|---|"
+    )
+
+    for _, row in report.iterrows():
+
+        price = row["current_price"]
+
+        if pd.isna(price):
+
+            price_text = "-"
+
+        else:
+
+            price_text = f"{price:.2f}"
+
+        flow = row["flow_score"]
+
+        if pd.isna(flow):
+
+            flow_text = "-"
+
+        else:
+
+            flow_text = f"{flow:.2f}"
+
+        lines.append(
+            f"| {int(row['final_rank'])} "
+            f"| {row['ticker']} "
+            f"| {row['decision_score']:.2f} "
+            f"| {flow_text} "
+            f"| {price_text} "
+            f"| {row['decision']} |"
         )
 
-        print(
-            output[
-                "special_structure"
-            ]
-            .value_counts()
-            .to_string()
+    lines.append("")
+
+    # --------------------------------------------------------
+    # DETAILED ANALYSIS
+    # --------------------------------------------------------
+
+    lines.append(
+        "## 4. DETAILED ANALYSIS"
+    )
+
+    lines.append("")
+
+    for _, row in report.iterrows():
+
+        ticker = row["ticker"]
+
+        lines.append(
+            f"### {int(row['final_rank'])}. {ticker}"
         )
 
-        print()
+        lines.append("")
 
-        print(
-            "TOP SPECIAL LIST"
+        lines.append(
+            f"- Decision: **{row['decision']}**"
         )
 
-        print(
-            output[
-                [
-                    "special_rank",
-                    "ticker",
-                    "special_structure",
-                    "direction",
-                    "quality_score",
-                    "flow_score",
-                    "top20"
-                ]
-            ]
-            .head(20)
-            .to_string(
-                index=False
+        lines.append(
+            f"- Decision Score: **{row['decision_score']:.2f}**"
+        )
+
+        if not pd.isna(
+            row["flow_score"]
+        ):
+
+            lines.append(
+                f"- Flow Score: **{row['flow_score']:.2f}**"
             )
+
+        if not pd.isna(
+            row["current_price"]
+        ):
+
+            lines.append(
+                f"- Current Price: **{row['current_price']:.2f}**"
+            )
+
+        if not pd.isna(
+            row["call_wall"]
+        ):
+
+            lines.append(
+                f"- Call Wall: **{row['call_wall']:.2f}**"
+            )
+
+        if not pd.isna(
+            row["put_wall"]
+        ):
+
+            lines.append(
+                f"- Put Wall: **{row['put_wall']:.2f}**"
+            )
+
+        if not pd.isna(
+            row["support"]
+        ):
+
+            lines.append(
+                f"- Support: **{row['support']:.2f}**"
+            )
+
+        if not pd.isna(
+            row["resistance"]
+        ):
+
+            lines.append(
+                f"- Resistance: **{row['resistance']:.2f}**"
+            )
+
+        if not pd.isna(
+            row["net_gex"]
+        ):
+
+            lines.append(
+                f"- Net GEX: **{row['net_gex']:.4e}**"
+            )
+
+        lines.append(
+            f"- Structure: **{row['structure']}**"
         )
+
+        lines.append(
+            f"- Reason: {row['reason']}"
+        )
+
+        lines.append("")
+
+    # --------------------------------------------------------
+    # WEIGHT INFORMATION
+    # --------------------------------------------------------
+
+    lines.append(
+        "## 5. DECISION ENGINE"
+    )
+
+    lines.append("")
+
+    lines.append(
+        "| Component | Weight |"
+    )
+
+    lines.append(
+        "|---|---:|"
+    )
+
+    lines.append(
+        "| Market | 25% |"
+    )
+
+    lines.append(
+        "| Flow | 30% |"
+    )
+
+    lines.append(
+        "| Structure | 20% |"
+    )
+
+    lines.append(
+        "| Price / Wall | 15% |"
+    )
+
+    lines.append(
+        "| Index | 10% |"
+    )
+
+    lines.append("")
+
+    lines.append(
+        "### Decision Threshold"
+    )
+
+    lines.append("")
+
+    lines.append(
+        "- 🟢 ENTRY: **>= 75**"
+    )
+
+    lines.append(
+        "- 🟡 WATCH: **55 - 74.99**"
+    )
+
+    lines.append(
+        "- 🔴 AVOID: **< 55**"
+    )
+
+    lines.append("")
+
+    # --------------------------------------------------------
+    # SAVE MARKDOWN
+    # --------------------------------------------------------
+
+    with open(
+        OUTPUT_MD,
+        "w",
+        encoding="utf-8"
+    ) as f:
+
+        f.write(
+            "\n".join(lines)
+        )
+
+    log(
+        f"MARKDOWN SAVED : {OUTPUT_MD}"
+    )
+
+    # --------------------------------------------------------
+    # VALIDATION
+    # --------------------------------------------------------
+
+    print()
+
+    print("=" * 72)
+    print("🔎 STEP 10 VALIDATION")
+    print("=" * 72)
+
+    print(
+        f"INPUT DECISION ROWS : {len(df)}"
+    )
+
+    print(
+        f"FINAL REPORT ROWS   : {len(report)}"
+    )
+
+    print(
+        f"UNIQUE TICKERS      : "
+        f"{report['ticker'].nunique()}"
+    )
 
     print()
 
     print(
-        "OUTPUT FILE : "
-        "data/analysis/special_list.csv"
+        f"🟢 ENTRY            : "
+        f"{entry_count}"
+    )
+
+    print(
+        f"🟡 WATCH            : "
+        f"{watch_count}"
+    )
+
+    print(
+        f"🔴 AVOID            : "
+        f"{avoid_count}"
+    )
+
+    print()
+
+    print(
+        "DECISION SCORE VALID : "
+        f"{report['decision_score'].notna().sum()}"
+    )
+
+    print(
+        "DECISION VALID       : "
+        f"{report['decision'].notna().sum()}"
+    )
+
+    print()
+
+    print(
+        "TOP 10 FINAL REPORT"
+    )
+
+    print("-" * 72)
+
+    print(
+        report[
+            [
+                "final_rank",
+                "ticker",
+                "decision_score",
+                "flow_score",
+                "decision"
+            ]
+        ].to_string(
+            index=False
+        )
+    )
+
+    print()
+
+    print(
+        f"CSV OUTPUT : {OUTPUT_CSV}"
+    )
+
+    print(
+        f"MD OUTPUT  : {OUTPUT_MD}"
     )
 
     print("=" * 72)
 
     log(
-        "STEP 11 SPECIAL LIST COMPLETE"
+        "STEP 10 FINAL REPORT COMPLETE"
     )
 
+
+# ============================================================
+# RUN
+# ============================================================
 
 if __name__ == "__main__":
     main()
