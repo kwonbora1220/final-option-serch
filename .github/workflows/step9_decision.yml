@@ -1,217 +1,252 @@
-# ============================================================
-# STEP 9 - DECISION
-# ============================================================
+name: STEP 9 Decision
 
-- name: STEP 9 Input Check
-  run: |
-    echo "=========================================="
-    echo "STEP 9 INPUT CHECK"
-    echo "=========================================="
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "02_PROGRAM/09_decision.py"
+      - "data/analysis/market_regime.csv"
+      - "data/analysis/structure.csv"
+      - "data/analysis/unusual_flow.csv"
+      - "data/analysis/top20.csv"
+      - ".github/workflows/step9_decision.yml"
 
-    echo ""
-    echo "STEP 1 MARKET REGIME CHECK"
-    echo "------------------------------------------"
+permissions:
+  contents: write
 
-    test -f data/analysis/market_regime.csv
+jobs:
+  decision:
+    runs-on: ubuntu-latest
 
-    python - <<'PY'
-    import pandas as pd
+    steps:
 
-    file = "data/analysis/market_regime.csv"
+      # ============================================================
+      # CHECKOUT
+      # ============================================================
 
-    df = pd.read_csv(file)
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    print("ROWS :", len(df))
-    print("COLUMNS :", df.columns.tolist())
+      # ============================================================
+      # PYTHON
+      # ============================================================
 
-    required = [
-        "market_score",
-        "regime",
-        "ndx_direction",
-        "spy_direction",
-        "soxx_direction",
-        "dia_direction"
-    ]
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-    for column in required:
-        if column not in df.columns:
-            raise ValueError(
-                f"Missing column in market_regime.csv: {column}"
-            )
+      # ============================================================
+      # DEPENDENCIES
+      # ============================================================
 
-    score = pd.to_numeric(
-        df["market_score"],
-        errors="coerce"
-    ).iloc[-1]
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-    if pd.isna(score):
-        raise ValueError(
-            "market_score is invalid"
-        )
+      # ============================================================
+      # STEP 9 INPUT CHECK
+      # ============================================================
 
-    print("")
-    print("MARKET SCORE :", score)
-    print("REGIME :", df["regime"].iloc[-1])
-    print("NDX :", df["ndx_direction"].iloc[-1])
-    print("SPY :", df["spy_direction"].iloc[-1])
-    print("SOXX :", df["soxx_direction"].iloc[-1])
-    print("DIA :", df["dia_direction"].iloc[-1])
+      - name: STEP 9 Input Check
+        run: |
+          echo "=========================================="
+          echo "STEP 9 INPUT CHECK"
+          echo "=========================================="
 
-    print("")
-    print("STEP 1 MARKET REGIME : OK")
-    PY
+          echo ""
+          echo "CURRENT DIRECTORY"
+          pwd
 
+          echo ""
+          echo "REPOSITORY FILES"
+          ls -la
 
-    echo ""
-    echo "=========================================="
-    echo "STRUCTURE CHECK"
-    echo "=========================================="
+          echo ""
+          echo "02_PROGRAM"
+          ls -la 02_PROGRAM || true
 
-    test -f data/analysis/structure.csv
+          echo ""
+          echo "ANALYSIS DIRECTORY"
+          ls -la data/analysis || true
 
-    python - <<'PY'
-    import pandas as pd
+          echo ""
+          echo "=========================================="
+          echo "REQUIRED FILES"
+          echo "=========================================="
 
-    file = "data/analysis/structure.csv"
+          test -f data/analysis/market_regime.csv
+          test -f data/analysis/structure.csv
+          test -f data/analysis/unusual_flow.csv
+          test -f data/analysis/top20.csv
 
-    df = pd.read_csv(file)
+          echo ""
+          echo "STEP 1 MARKET REGIME"
+          echo "------------------------------------------"
+          cat data/analysis/market_regime.csv
 
-    print("ROWS :", len(df))
-    print("COLUMNS :", df.columns.tolist())
+          echo ""
+          echo "STEP 8 STRUCTURE"
+          echo "------------------------------------------"
+          head -10 data/analysis/structure.csv
 
-    required = [
-        "ticker",
-        "current_price",
-        "call_wall",
-        "put_wall",
-        "support",
-        "resistance",
-        "net_gex",
-        "structure"
-    ]
+          echo ""
+          echo "UNUSUAL FLOW"
+          echo "------------------------------------------"
+          head -10 data/analysis/unusual_flow.csv
 
-    for column in required:
-        if column not in df.columns:
-            raise ValueError(
-                f"Missing column in structure.csv: {column}"
-            )
+          echo ""
+          echo "TOP20"
+          echo "------------------------------------------"
+          head -10 data/analysis/top20.csv
 
-    print("STRUCTURE : OK")
-    PY
+          echo ""
+          echo "STEP 9 INPUT CHECK : OK"
 
+      # ============================================================
+      # RUN STEP 9
+      # ============================================================
 
-    echo ""
-    echo "=========================================="
-    echo "UNUSUAL FLOW CHECK"
-    echo "=========================================="
+      - name: Run STEP 9 Decision
+        run: |
+          echo "=========================================="
+          echo "STEP 9 DECISION"
+          echo "=========================================="
 
-    test -f data/analysis/unusual_flow.csv
+          python 02_PROGRAM/09_decision.py
 
-    python - <<'PY'
-    import pandas as pd
+      # ============================================================
+      # STEP 9 OUTPUT CHECK
+      # ============================================================
 
-    file = "data/analysis/unusual_flow.csv"
+      - name: STEP 9 Output Check
+        run: |
+          echo "=========================================="
+          echo "STEP 9 OUTPUT CHECK"
+          echo "=========================================="
 
-    df = pd.read_csv(file)
+          test -f data/analysis/decision.csv
 
-    print("ROWS :", len(df))
-    print("COLUMNS :", df.columns.tolist())
+          echo ""
+          echo "DECISION FILE"
+          echo "------------------------------------------"
 
-    if "ticker" not in df.columns:
-        raise ValueError(
-            "ticker column missing in unusual_flow.csv"
-        )
+          ls -lh data/analysis/decision.csv
 
-    print("UNUSUAL FLOW : OK")
-    PY
+          echo ""
+          echo "DECISION CONTENT"
+          echo "------------------------------------------"
 
+          cat data/analysis/decision.csv
 
-    echo ""
-    echo "=========================================="
-    echo "TOP20 CHECK"
-    echo "=========================================="
+          echo ""
+          echo "STEP 9 OUTPUT : OK"
 
-    test -f data/analysis/top20.csv
+      # ============================================================
+      # VALIDATION
+      # ============================================================
 
-    python - <<'PY'
-    import pandas as pd
+      - name: STEP 9 Validation
+        run: |
+          echo "=========================================="
+          echo "STEP 9 VALIDATION"
+          echo "=========================================="
 
-    file = "data/analysis/top20.csv"
+          python - <<'PY'
+          import pandas as pd
 
-    df = pd.read_csv(file)
+          file = "data/analysis/decision.csv"
 
-    print("ROWS :", len(df))
-    print("COLUMNS :", df.columns.tolist())
+          df = pd.read_csv(file)
 
-    if "ticker" not in df.columns:
-        raise ValueError(
-            "ticker column missing in top20.csv"
-        )
+          print("ROWS :", len(df))
+          print("COLUMNS :", list(df.columns))
 
-    print("TOP20 : OK")
-    PY
+          required = [
+              "ticker",
+              "decision_score",
+              "decision"
+          ]
 
+          for column in required:
+              if column not in df.columns:
+                  raise RuntimeError(
+                      f"Required column missing: {column}"
+                  )
 
-    echo ""
-    echo "=========================================="
-    echo "STEP 9 INPUT CHECK : OK"
-    echo "=========================================="
+          print("")
+          print("DECISION SUMMARY")
+          print("------------------------------------------")
 
+          if "decision" in df.columns:
+              print(df["decision"].value_counts(dropna=False))
 
-- name: Run STEP 9 Decision
-  run: |
-    echo "=========================================="
-    echo "STEP 9 DECISION"
-    echo "=========================================="
+          print("")
+          print("TOP DECISIONS")
+          print("------------------------------------------")
 
-    python 02_PROGRAM/09_decision.py
+          columns = [
+              column
+              for column in [
+                  "final_rank",
+                  "rank",
+                  "ticker",
+                  "market_score",
+                  "flow_score",
+                  "decision_score",
+                  "decision"
+              ]
+              if column in df.columns
+          ]
 
+          print(
+              df[columns]
+              .head(20)
+              .to_string(index=False)
+          )
 
-- name: STEP 9 Output Check
-  run: |
-    echo "=========================================="
-    echo "STEP 9 OUTPUT CHECK"
-    echo "=========================================="
+          print("")
+          print("STEP 9 VALIDATION : OK")
+          PY
 
-    test -f data/analysis/decision.csv
+      # ============================================================
+      # SAVE RESULT
+      # ============================================================
 
-    echo ""
-    echo "DECISION FILE"
-    echo "------------------------------------------"
+      - name: Save STEP 9 result to GitHub
+        run: |
+          echo "=========================================="
+          echo "SAVE STEP 9 RESULT"
+          echo "=========================================="
 
-    ls -lh data/analysis/decision.csv
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-    echo ""
-    cat data/analysis/decision.csv
+          git add data/analysis/decision.csv
 
-    echo ""
-    echo "STEP 9 OUTPUT : OK"
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Add STEP 9 market stock decision"
+            git push
+          fi
 
+      # ============================================================
+      # COMPLETE
+      # ============================================================
 
-- name: Save STEP 9 result to GitHub
-  run: |
-    echo "=========================================="
-    echo "SAVE STEP 9 RESULT"
-    echo "=========================================="
+      - name: STEP 9 Complete
+        run: |
+          echo "=========================================="
+          echo "🔥 STEP 9 DECISION COMPLETE"
+          echo "=========================================="
 
-    git config user.name "github-actions[bot]"
-    git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          echo ""
+          echo "decision.csv saved to:"
+          echo "data/analysis/decision.csv"
 
-    git add data/analysis/decision.csv
-
-    if git diff --cached --quiet; then
-      echo "No changes to commit."
-    else
-      git commit -m "Add STEP 9 market stock decision"
-      git push
-    fi
-
-
-- name: STEP 9 Complete
-  run: |
-    echo "=========================================="
-    echo "🔥 STEP 9 DECISION COMPLETE"
-    echo "=========================================="
-
-    echo "decision.csv saved to:"
-    echo "data/analysis/decision.csv"
+          echo ""
+          echo "STEP 9 STATUS : SUCCESS"
