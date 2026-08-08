@@ -1,4 +1,3 @@
-
 name: STEP 9 - Market Stock Decision
 
 on:
@@ -28,6 +27,7 @@ jobs:
           echo "STEP 9 INPUT CHECK"
           echo "=========================================="
 
+          test -f data/analysis/market_regime.csv
           test -f data/analysis/structure.csv
           test -f data/analysis/unusual_flow.csv
           test -f data/analysis/top20.csv
@@ -37,12 +37,50 @@ jobs:
           echo "------------------------------------------"
 
           ls -lh \
+            data/analysis/market_regime.csv \
             data/analysis/structure.csv \
             data/analysis/unusual_flow.csv \
             data/analysis/top20.csv
 
           echo ""
           echo "INPUT FILES : OK"
+
+      - name: STEP 1 Market Regime Check
+        run: |
+          echo "=========================================="
+          echo "STEP 1 MARKET REGIME CHECK"
+          echo "=========================================="
+
+          python - <<'PY'
+          import pandas as pd
+
+          file = "data/analysis/market_regime.csv"
+
+          df = pd.read_csv(file)
+
+          print(f"ROWS            : {len(df)}")
+          print(f"TICKERS         : {df['ticker'].nunique()}")
+
+          score = pd.to_numeric(
+              df["market_score"],
+              errors="coerce"
+          ).dropna().iloc[-1]
+
+          regime = str(
+              df["market_regime"].dropna().iloc[-1]
+          )
+
+          print(f"MARKET SCORE    : {score:.2f} / 100")
+          print(f"MARKET REGIME   : {regime}")
+
+          if not 0 <= score <= 100:
+              raise ValueError(
+                  f"Invalid market score: {score}"
+              )
+
+          print("")
+          print("STEP 1 MARKET DATA : OK")
+          PY
 
       - name: Run Decision Engine
         run: |
@@ -69,6 +107,16 @@ jobs:
 
           print(f"ROWS             : {len(df)}")
           print(f"TICKERS          : {df['ticker'].nunique()}")
+
+          print(
+              "MARKET SCORE      :",
+              df["market_score"].iloc[0]
+          )
+
+          print(
+              "MARKET REGIME     :",
+              df["market_regime"].iloc[0]
+          )
 
           print(
               "SCORE VALID       :",
@@ -119,4 +167,3 @@ jobs:
 
           echo "decision.csv saved to:"
           echo "data/analysis/decision.csv"
-
