@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 from datetime import datetime, date
 
@@ -11,26 +12,46 @@ import yfinance as yf
 # STEP 2 - OPTION DATA COLLECTOR
 # ============================================================
 
-TEST_UNIVERSE = [
-    "SPY",
-    "QQQ",
-    "NVDA",
-    "AAPL",
-    "MSFT",
-    "AMZN",
-    "AMD",
-    "META",
-    "GOOG",
-    "TSLA",
-]
+
+# ============================================================
+# PROJECT PATH
+# ============================================================
+
+BASE_DIR = os.path.dirname(
+    os.path.dirname(
+        os.path.abspath(__file__)
+    )
+)
+
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
+
+# ============================================================
+# UNIVERSE
+# ============================================================
+
+from config.universe import (
+    DEFAULT_OPTION_UNIVERSE,
+)
+
+
+# ============================================================
+# CONFIG
+# ============================================================
 
 MIN_DTE = 0
 MAX_DTE = 180
 
-OUTPUT_DIR = "data/raw"
+OUTPUT_DIR = os.path.join(
+    BASE_DIR,
+    "data",
+    "raw",
+)
+
 OUTPUT_FILE = os.path.join(
     OUTPUT_DIR,
-    "options_raw.csv"
+    "options_raw.csv",
 )
 
 
@@ -39,11 +60,14 @@ OUTPUT_FILE = os.path.join(
 # ============================================================
 
 def log(message):
+
     now = datetime.utcnow().strftime(
         "%Y-%m-%d %H:%M:%S UTC"
     )
+
     print(
-        f"[02 COLLECTOR] {now} | {message}"
+        f"[02 COLLECTOR] "
+        f"{now} | {message}"
     )
 
 
@@ -55,11 +79,11 @@ def prepare_directory():
 
     os.makedirs(
         OUTPUT_DIR,
-        exist_ok=True
+        exist_ok=True,
     )
 
     log(
-        f"OUTPUT DIRECTORY READY : "
+        "OUTPUT DIRECTORY READY : "
         f"{OUTPUT_DIR}"
     )
 
@@ -72,10 +96,12 @@ def calculate_dte(expiration):
 
     today = date.today()
 
-    expiration_date = datetime.strptime(
-        expiration,
-        "%Y-%m-%d"
-    ).date()
+    expiration_date = (
+        datetime.strptime(
+            expiration,
+            "%Y-%m-%d",
+        ).date()
+    )
 
     return (
         expiration_date - today
@@ -102,14 +128,14 @@ def collect_ticker(ticker):
 
         history = stock.history(
             period="5d",
-            auto_adjust=False
+            auto_adjust=False,
         )
 
         if history.empty:
 
             log(
                 f"{ticker} FAILED - "
-                f"NO PRICE DATA"
+                "NO PRICE DATA"
             )
 
             return []
@@ -133,7 +159,7 @@ def collect_ticker(ticker):
 
             log(
                 f"{ticker} FAILED - "
-                f"NO EXPIRATIONS"
+                "NO EXPIRATIONS"
             )
 
             return []
@@ -176,7 +202,7 @@ def collect_ticker(ticker):
                 continue
 
             # ------------------------------------------------
-            # DTE filter
+            # DTE FILTER
             # ------------------------------------------------
 
             if dte < MIN_DTE:
@@ -206,7 +232,7 @@ def collect_ticker(ticker):
             )
 
             # ------------------------------------------------
-            # Option chain
+            # OPTION CHAIN
             # ------------------------------------------------
 
             try:
@@ -246,7 +272,7 @@ def collect_ticker(ticker):
                             expiration=expiration,
                             dte=dte,
                             option_type="CALL",
-                            row=row
+                            row=row,
                         )
                     )
 
@@ -271,12 +297,12 @@ def collect_ticker(ticker):
                             expiration=expiration,
                             dte=dte,
                             option_type="PUT",
-                            row=row
+                            row=row,
                         )
                     )
 
             # ------------------------------------------------
-            # Small pause
+            # SMALL PAUSE
             # ------------------------------------------------
 
             time.sleep(0.2)
@@ -304,7 +330,7 @@ def collect_ticker(ticker):
 
             log(
                 f"{ticker} DTE RANGE : "
-                f"NO DATA"
+                "NO DATA"
             )
 
         return rows
@@ -329,7 +355,7 @@ def build_row(
     expiration,
     dte,
     option_type,
-    row
+    row,
 ):
 
     strike = safe_float(
@@ -357,9 +383,7 @@ def build_row(
     )
 
     implied_volatility = safe_float(
-        row.get(
-            "impliedVolatility"
-        )
+        row.get("impliedVolatility")
     )
 
     change = safe_float(
@@ -502,7 +526,7 @@ def save_data(rows):
 
     df.to_csv(
         OUTPUT_FILE,
-        index=False
+        index=False,
     )
 
     log(
@@ -521,7 +545,7 @@ def save_data(rows):
 
     print()
     print("=" * 72)
-    print("🔥 OPTION COLLECTION SUMMARY")
+    print("OPTION COLLECTION SUMMARY")
     print("=" * 72)
 
     print(
@@ -591,7 +615,7 @@ def validate_data(rows):
 
     print()
     print("=" * 72)
-    print("🔎 STEP 2 VALIDATION")
+    print("STEP 2 VALIDATION")
     print("=" * 72)
 
     # --------------------------------------------------------
@@ -687,7 +711,7 @@ def validate_data(rows):
     if min_dte < MIN_DTE:
 
         print(
-            "❌ DTE BELOW MINIMUM"
+            "DTE BELOW MINIMUM"
         )
 
         return False
@@ -695,7 +719,7 @@ def validate_data(rows):
     if max_dte > MAX_DTE:
 
         print(
-            "❌ DTE ABOVE MAXIMUM"
+            "DTE ABOVE MAXIMUM"
         )
 
         return False
@@ -707,7 +731,7 @@ def validate_data(rows):
     if call_count == 0:
 
         print(
-            "❌ NO CALL DATA"
+            "NO CALL DATA"
         )
 
         return False
@@ -715,7 +739,7 @@ def validate_data(rows):
     if put_count == 0:
 
         print(
-            "❌ NO PUT DATA"
+            "NO PUT DATA"
         )
 
         return False
@@ -743,9 +767,41 @@ def main():
 
     prepare_directory()
 
+    # --------------------------------------------------------
+    # LOAD UNIVERSE
+    # --------------------------------------------------------
+
+    universe = list(
+        DEFAULT_OPTION_UNIVERSE
+    )
+
+    if not universe:
+
+        raise RuntimeError(
+            "Option universe is empty."
+        )
+
+    log(
+        f"OPTION UNIVERSE : "
+        f"{len(universe)} TICKERS"
+    )
+
     all_rows = []
 
-    for ticker in TEST_UNIVERSE:
+    # --------------------------------------------------------
+    # COLLECT ALL TICKERS
+    # --------------------------------------------------------
+
+    for index, ticker in enumerate(
+        universe,
+        start=1,
+    ):
+
+        log(
+            f"UNIVERSE PROGRESS : "
+            f"{index}/{len(universe)} | "
+            f"{ticker}"
+        )
 
         rows = collect_ticker(
             ticker
@@ -758,6 +814,10 @@ def main():
         f"ROWS={len(all_rows):,}"
     )
 
+    # --------------------------------------------------------
+    # FATAL CHECK
+    # --------------------------------------------------------
+
     if not all_rows:
 
         log(
@@ -769,6 +829,10 @@ def main():
             "No option data collected."
         )
 
+    # --------------------------------------------------------
+    # VALIDATE
+    # --------------------------------------------------------
+
     valid = validate_data(
         all_rows
     )
@@ -778,6 +842,10 @@ def main():
         raise RuntimeError(
             "STEP 2 validation failed."
         )
+
+    # --------------------------------------------------------
+    # SAVE
+    # --------------------------------------------------------
 
     save_data(
         all_rows
