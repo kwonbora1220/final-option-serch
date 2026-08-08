@@ -6,7 +6,8 @@ import yfinance as yf
 
 
 # ============================================================
-# CONFIG
+# OPTION FLOW SCANNER V3
+# STEP 1 - MARKET REGIME ENGINE
 # ============================================================
 
 TICKERS = {
@@ -25,7 +26,9 @@ INTERVAL = "1d"
 # ============================================================
 
 def log(message):
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now(timezone.utc).strftime(
+        "%Y-%m-%d %H:%M:%S UTC"
+    )
     print(f"[01 MARKET] {now} | {message}")
 
 
@@ -53,9 +56,7 @@ def calculate_rsi(series, period=14):
 
     rs = avg_gain / avg_loss.replace(0, math.nan)
 
-    rsi = 100 - (100 / (1 + rs))
-
-    return rsi
+    return 100 - (100 / (1 + rs))
 
 
 # ============================================================
@@ -68,9 +69,9 @@ def calculate_trend(df):
     sma20 = close.rolling(20).mean()
     sma50 = close.rolling(50).mean()
 
-    latest = close.iloc[-1]
-    latest_sma20 = sma20.iloc[-1]
-    latest_sma50 = sma50.iloc[-1]
+    latest = float(close.iloc[-1])
+    latest_sma20 = float(sma20.iloc[-1])
+    latest_sma50 = float(sma50.iloc[-1])
 
     if pd.isna(latest_sma20) or pd.isna(latest_sma50):
         return "UNAVAILABLE"
@@ -114,6 +115,46 @@ def calculate_levels(df):
 
 
 # ============================================================
+# DIRECTION
+# ============================================================
+
+def determine_direction(result):
+    if result is None:
+        return "UNAVAILABLE"
+
+    score = 0
+
+    # Daily price
+    if result["daily_change_pct"] > 0:
+        score += 1
+    elif result["daily_change_pct"] < 0:
+        score -= 1
+
+    # Trend
+    if result["trend"] == "BULLISH":
+        score += 2
+    elif result["trend"] == "BEARISH":
+        score -= 2
+
+    # RSI
+    rsi = result["rsi"]
+
+    if rsi is not None:
+        if rsi >= 55:
+            score += 1
+        elif rsi <= 45:
+            score -= 1
+
+    if score >= 2:
+        return "BULLISH"
+
+    if score <= -2:
+        return "BEARISH"
+
+    return "NEUTRAL"
+
+
+# ============================================================
 # SINGLE MARKET ANALYSIS
 # ============================================================
 
@@ -147,13 +188,19 @@ def analyze_ticker(name, ticker):
 
         for column in required_columns:
             if column not in df.columns:
-                log(f"{name} FAILED - MISSING {column}")
+                log(
+                    f"{name} FAILED - "
+                    f"MISSING {column}"
+                )
                 return None
 
         df = df.dropna(subset=["Close"])
 
         if len(df) < 50:
-            log(f"{name} FAILED - NOT ENOUGH DATA")
+            log(
+                f"{name} FAILED - "
+                f"NOT ENOUGH DATA"
+            )
             return None
 
         close = df["Close"]
@@ -161,27 +208,32 @@ def analyze_ticker(name, ticker):
         current_price = float(close.iloc[-1])
         previous_close = float(close.iloc[-2])
 
-        daily_change = current_price - previous_close
+        daily_change = (
+            current_price - previous_close
+        )
+
         daily_change_pct = (
             daily_change / previous_close
         ) * 100
 
         day_high = float(df["High"].iloc[-1])
         day_low = float(df["Low"].iloc[-1])
+
         volume = int(df["Volume"].iloc[-1])
 
-        rsi = calculate_rsi(close).iloc[-1]
+        rsi_series = calculate_rsi(close)
+        rsi = rsi_series.iloc[-1]
+
+        if pd.isna(rsi):
+            rsi_value = None
+        else:
+            rsi_value = float(rsi)
 
         trend = calculate_trend(df)
 
         momentum = calculate_momentum(df)
 
         support, resistance = calculate_levels(df)
-
-        if pd.isna(rsi):
-            rsi_value = None
-        else:
-            rsi_value = float(rsi)
 
         result = {
             "name": name,
@@ -199,51 +251,30 @@ def analyze_ticker(name, ticker):
             "resistance": resistance,
         }
 
+        result["direction"] = determine_direction(
+            result
+        )
+
         log(f"{name} OK")
 
         return result
 
     except Exception as e:
-        log(f"{name} FAILED - {type(e).__name__}: {e}")
+        log(
+            f"{name} FAILED - "
+            f"{type(e).__name__}: {e}"
+        )
+
         return None
 
 
 # ============================================================
-# MARKET ALIGNMENT
+# MARKET SCORE
 # ============================================================
 
-def determine_direction(result):
-    if result is None:
-        return "UNAVAILABLE"
-
-    score = 0
-
-    if result["daily_change_pct"] > 0:
-        score += 1
-    elif result["daily_change_pct"] < 0:
-        score -= 1
-
-    if result["trend"] == "BULLISH":
-        score += 2
-    elif result["trend"] == "BEARISH":
-        score -= 2
-
-    if result["rsi"] is not None:
-        if result["rsi"] >= 55:
-            score += 1
-        elif result["rsi"] <= 45:
-            score -= 1
-
-    if score >= 2:
-        return "BULLISH"
-
-    if score <= -2:
-        return "BEARISH"
-
-    return "NEUTRAL"
-
-
 def calculate_market_score(results):
+
+    # Technology / broad market에 조금 더 높은 가중치
     weights = {
         "NDX": 1.25,
         "SPY": 1.25,
@@ -262,15 +293,17 @@ def calculate_market_score(results):
     total_weight = 0.0
 
     for name, result in results.items():
+
         if result is None:
             continue
 
-        direction = determine_direction(result)
+        direction = result["direction"]
 
-        weight = weights.get(name, 1.0)
+        weight = weights[name]
 
         weighted_total += (
-            direction_scores[direction] * weight
+            direction_scores[direction]
+            * weight
         )
 
         total_weight += weight
@@ -278,9 +311,7 @@ def calculate_market_score(results):
     if total_weight == 0:
         return None
 
-    normalized = weighted_total / total_weight
-
-    return normalized
+    return weighted_total / total_weight
 
 
 # ============================================================
@@ -288,6 +319,7 @@ def calculate_market_score(results):
 # ============================================================
 
 def determine_regime(score):
+
     if score is None:
         return "NO DATA"
 
@@ -311,96 +343,237 @@ def determine_regime(score):
 # ============================================================
 
 def detect_divergence(results):
-    ndx = determine_direction(results.get("NDX"))
-    spy = determine_direction(results.get("SPY"))
-    soxx = determine_direction(results.get("SOXX"))
-    dia = determine_direction(results.get("DIA"))
+
+    ndx = results.get("NDX")
+    spy = results.get("SPY")
+    soxx = results.get("SOXX")
+    dia = results.get("DIA")
 
     messages = []
 
-    if ndx == "BULLISH" and spy == "BEARISH":
+    ndx_direction = (
+        ndx["direction"]
+        if ndx else "UNAVAILABLE"
+    )
+
+    spy_direction = (
+        spy["direction"]
+        if spy else "UNAVAILABLE"
+    )
+
+    soxx_direction = (
+        soxx["direction"]
+        if soxx else "UNAVAILABLE"
+    )
+
+    dia_direction = (
+        dia["direction"]
+        if dia else "UNAVAILABLE"
+    )
+
+    # Technology vs broad market
+    if (
+        ndx_direction == "BULLISH"
+        and spy_direction == "BEARISH"
+    ):
         messages.append(
-            "Technology strong / Broad market weak"
+            "Technology strong / "
+            "Broad market weak"
         )
 
-    if ndx == "BEARISH" and spy == "BULLISH":
+    if (
+        ndx_direction == "BEARISH"
+        and spy_direction == "BULLISH"
+    ):
         messages.append(
-            "Technology weak / Broad market strong"
+            "Technology weak / "
+            "Broad market strong"
         )
 
-    if soxx == "BULLISH" and ndx != "BULLISH":
+    # Semiconductor leadership
+    if (
+        soxx_direction == "BULLISH"
+        and ndx_direction != "BULLISH"
+    ):
         messages.append(
-            "Semiconductors stronger than Nasdaq"
+            "Semiconductors stronger "
+            "than Nasdaq"
         )
 
-    if soxx == "BEARISH" and ndx != "BEARISH":
+    if (
+        soxx_direction == "BEARISH"
+        and ndx_direction != "BEARISH"
+    ):
         messages.append(
-            "Semiconductors weaker than Nasdaq"
+            "Semiconductors weaker "
+            "than Nasdaq"
         )
 
-    if dia == "BULLISH" and ndx == "BEARISH":
+    # Technology vs traditional sectors
+    if (
+        dia_direction == "BULLISH"
+        and ndx_direction == "BEARISH"
+    ):
         messages.append(
-            "Traditional sectors strong / Technology weak"
+            "Traditional sectors strong / "
+            "Technology weak"
         )
 
-    if dia == "BEARISH" and ndx == "BULLISH":
+    if (
+        dia_direction == "BEARISH"
+        and ndx_direction == "BULLISH"
+    ):
         messages.append(
-            "Technology strong / Traditional sectors weak"
+            "Technology strong / "
+            "Traditional sectors weak"
         )
 
     return messages
 
 
 # ============================================================
+# MARKET ALIGNMENT
+# ============================================================
+
+def print_alignment(results):
+
+    print()
+    print("=" * 72)
+    print("📊 MARKET ALIGNMENT")
+    print("=" * 72)
+
+    for name in [
+        "NDX",
+        "SPY",
+        "SOXX",
+        "DIA"
+    ]:
+
+        result = results.get(name)
+
+        if result is None:
+            print(
+                f"{name:<6} : UNAVAILABLE"
+            )
+            continue
+
+        direction = result["direction"]
+
+        emoji = {
+            "BULLISH": "🟢",
+            "NEUTRAL": "🟡",
+            "BEARISH": "🔴",
+            "UNAVAILABLE": "⚪",
+        }.get(direction, "⚪")
+
+        print(
+            f"{name:<6} : "
+            f"{emoji} {direction}"
+        )
+
+
+# ============================================================
 # REPORT
 # ============================================================
 
-def print_report(results, market_score, regime):
+def print_report(
+    results,
+    market_score,
+    regime
+):
+
     print()
-    print("=" * 70)
+    print("=" * 72)
     print("🔥 MARKET REGIME ANALYSIS")
-    print("=" * 70)
+    print("=" * 72)
 
     print(
-        f"DATE : "
-        f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        "UTC TIME : "
+        + datetime.now(timezone.utc).strftime(
+            "%Y-%m-%d %H:%M:%S UTC"
+        )
     )
 
     print()
 
-    for name in ["NDX", "SPY", "SOXX", "DIA"]:
+    # --------------------------------------------------------
+    # Individual markets
+    # --------------------------------------------------------
+
+    for name in [
+        "NDX",
+        "SPY",
+        "SOXX",
+        "DIA"
+    ]:
+
         result = results.get(name)
 
-        print("-" * 70)
-        print(name)
+        print()
+        print("-" * 72)
+        print(f"📈 {name}")
+        print("-" * 72)
 
         if result is None:
             print("STATUS : FAILED")
             continue
 
-        direction = determine_direction(result)
+        print(
+            f"PRICE          : "
+            f"${result['price']:.2f}"
+        )
 
-        print(f"PRICE          : ${result['price']:.2f}")
         print(
             f"DAILY CHANGE   : "
             f"{result['daily_change_pct']:+.2f}%"
         )
-        print(f"DAY HIGH       : ${result['high']:.2f}")
-        print(f"DAY LOW        : ${result['low']:.2f}")
-        print(f"VOLUME         : {result['volume']:,}")
-
-        if result["rsi"] is not None:
-            print(f"RSI(14)        : {result['rsi']:.2f}")
-        else:
-            print("RSI(14)        : UNAVAILABLE")
 
         print(
-            f"MOMENTUM(20D)  : "
-            f"{result['momentum_pct_20d']:+.2f}%"
+            f"DAY HIGH       : "
+            f"${result['high']:.2f}"
         )
 
-        print(f"TREND          : {result['trend']}")
-        print(f"DIRECTION      : {direction}")
+        print(
+            f"DAY LOW        : "
+            f"${result['low']:.2f}"
+        )
+
+        print(
+            f"VOLUME         : "
+            f"{result['volume']:,}"
+        )
+
+        if result["rsi"] is not None:
+            print(
+                f"RSI(14)        : "
+                f"{result['rsi']:.2f}"
+            )
+        else:
+            print(
+                "RSI(14)        : "
+                "UNAVAILABLE"
+            )
+
+        if result["momentum_pct_20d"] is not None:
+            print(
+                f"MOMENTUM(20D)  : "
+                f"{result['momentum_pct_20d']:+.2f}%"
+            )
+        else:
+            print(
+                "MOMENTUM(20D)  : "
+                "UNAVAILABLE"
+            )
+
+        print(
+            f"TREND          : "
+            f"{result['trend']}"
+        )
+
+        print(
+            f"DIRECTION      : "
+            f"{result['direction']}"
+        )
 
         print(
             f"SUPPORT        : "
@@ -412,23 +585,20 @@ def print_report(results, market_score, regime):
             f"${result['resistance']:.2f}"
         )
 
-    print()
-    print("=" * 70)
-    print("🔥 MARKET REGIME")
-    print("=" * 70)
+    # --------------------------------------------------------
+    # Alignment
+    # --------------------------------------------------------
 
-    if market_score is None:
-        print("SCORE : UNAVAILABLE")
-    else:
-        print(
-            f"SCORE : {market_score * 100:+.1f}"
-        )
+    print_alignment(results)
 
-    print(f"REGIME : {regime}")
+    # --------------------------------------------------------
+    # Divergence
+    # --------------------------------------------------------
 
     print()
-    print("📊 MARKET DIVERGENCE")
-    print("-" * 70)
+    print("=" * 72)
+    print("⚠️ MARKET DIVERGENCE")
+    print("=" * 72)
 
     divergence = detect_divergence(results)
 
@@ -436,22 +606,88 @@ def print_report(results, market_score, regime):
         for item in divergence:
             print(f"⚠️ {item}")
     else:
-        print("No major divergence detected.")
+        print(
+            "No major divergence detected."
+        )
+
+    # --------------------------------------------------------
+    # Regime
+    # --------------------------------------------------------
 
     print()
-    print("=" * 70)
-    print("DATA SOURCE")
-    print("=" * 70)
-    print("Price / OHLC / Volume : REAL")
-    print("RSI                   : CALCULATED")
-    print("Trend                 : CALCULATED")
-    print("Momentum              : CALCULATED")
-    print("Support / Resistance  : CALCULATED")
-    print("Options data          : STEP 2")
-    print("GEX                   : STEP 4")
-    print("Call Wall / Put Wall  : STEP 4")
-    print("HIRO                  : UNAVAILABLE")
-    print("=" * 70)
+    print("=" * 72)
+    print("🔥 MARKET REGIME SCORE")
+    print("=" * 72)
+
+    if market_score is None:
+
+        print("SCORE  : UNAVAILABLE")
+        print("REGIME : NO DATA")
+
+    else:
+
+        score_100 = market_score * 100
+
+        print(
+            f"SCORE  : "
+            f"{score_100:+.1f} / 100"
+        )
+
+        print(
+            f"REGIME : "
+            f"{regime}"
+        )
+
+    # --------------------------------------------------------
+    # Data reliability
+    # --------------------------------------------------------
+
+    print()
+    print("=" * 72)
+    print("📌 DATA RELIABILITY")
+    print("=" * 72)
+
+    print(
+        "Price / OHLC / Volume : REAL"
+    )
+
+    print(
+        "RSI                   : CALCULATED"
+    )
+
+    print(
+        "Trend                 : CALCULATED"
+    )
+
+    print(
+        "Momentum              : CALCULATED"
+    )
+
+    print(
+        "Support / Resistance  : CALCULATED"
+    )
+
+    print(
+        "Option data           : STEP 2"
+    )
+
+    print(
+        "Greeks                : STEP 4"
+    )
+
+    print(
+        "GEX                   : STEP 4"
+    )
+
+    print(
+        "Call Wall / Put Wall  : STEP 4"
+    )
+
+    print(
+        "HIRO                  : UNAVAILABLE"
+    )
+
+    print("=" * 72)
 
 
 # ============================================================
@@ -459,25 +695,36 @@ def print_report(results, market_score, regime):
 # ============================================================
 
 def main():
+
     log("START")
 
     results = {}
 
     for name, ticker in TICKERS.items():
+
         results[name] = analyze_ticker(
             name,
             ticker
         )
 
     successful = sum(
-        1 for value in results.values()
+        1
+        for value in results.values()
         if value is not None
     )
 
     log(
         f"DATA CHECK "
-        f"{successful}/{len(TICKERS)} SUCCESS"
+        f"{successful}/"
+        f"{len(TICKERS)} SUCCESS"
     )
+
+    if successful != len(TICKERS):
+
+        log(
+            "WARNING - "
+            "ONE OR MORE MARKET DATASETS FAILED"
+        )
 
     market_score = calculate_market_score(
         results
