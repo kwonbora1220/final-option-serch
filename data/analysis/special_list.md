@@ -6,4 +6,4 @@
 
 ※ 0건도 정상 결과입니다.
 
-SPECIAL LIST : 0
+**SPECIAL LIST : 0**
