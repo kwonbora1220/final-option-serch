@@ -1,4 +1,3 @@
-
 name: STEP 8 - Option Structure
 
 on:
@@ -28,10 +27,10 @@ jobs:
           echo "STEP 8 INPUT CHECK"
           echo "=========================================="
 
-          ls -lh data/analysis/
-
           test -f data/analysis/options_greeks.csv
           test -f data/analysis/top20.csv
+
+          ls -lh data/analysis/
 
           echo "INPUT FILES : OK"
 
@@ -40,18 +39,24 @@ jobs:
           python - <<'PY'
           import pandas as pd
 
-          df = pd.read_csv("data/analysis/top20.csv")
+          file = "data/analysis/top20.csv"
+
+          df = pd.read_csv(file)
 
           print("==========================================")
           print("TOP20 COLUMN CHECK")
           print("==========================================")
+
+          print("ROWS:", len(df))
+
           print("COLUMNS:")
           for col in df.columns:
               print(repr(col))
 
           print()
-          print("FIRST ROW:")
-          print(df.head(1).to_string(index=False))
+          print("FIRST 3 ROWS:")
+          print(df.head(3).to_string(index=False))
+
           print("==========================================")
           PY
 
