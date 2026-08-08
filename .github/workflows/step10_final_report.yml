@@ -1,4 +1,3 @@
-
 name: STEP 10 - Final Report
 
 on:
@@ -6,9 +5,11 @@ on:
 
 jobs:
   final-report:
+
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -24,31 +25,20 @@ jobs:
 
       - name: STEP 10 Input Check
         run: |
+
           echo "=========================================="
           echo "STEP 10 INPUT CHECK"
           echo "=========================================="
 
-          test -f data/analysis/structure.csv
-          test -f data/analysis/unusual_flow.csv
-          test -f data/analysis/top20.csv
-          test -f data/analysis/option_search.csv
-          test -f data/analysis/options_greeks.csv
           test -f data/analysis/decision.csv
 
-          echo ""
-          echo "REQUIRED FILES : OK"
-          echo ""
+          echo "DECISION FILE : OK"
 
-          ls -lh \
-            data/analysis/structure.csv \
-            data/analysis/unusual_flow.csv \
-            data/analysis/top20.csv \
-            data/analysis/option_search.csv \
-            data/analysis/options_greeks.csv \
-            data/analysis/decision.csv
+          ls -lh data/analysis/decision.csv
 
       - name: Run STEP 10 Final Report
         run: |
+
           echo "=========================================="
           echo "STEP 10 FINAL REPORT"
           echo "=========================================="
@@ -57,40 +47,60 @@ jobs:
 
       - name: STEP 10 Output Check
         run: |
+
           echo "=========================================="
           echo "STEP 10 OUTPUT CHECK"
           echo "=========================================="
 
           test -f data/analysis/final_report.csv
+          test -f data/analysis/final_report.md
+
+          echo "FINAL REPORT FILES : OK"
+
+          echo ""
+          echo "CSV:"
+          ls -lh data/analysis/final_report.csv
+
+          echo ""
+          echo "MARKDOWN:"
+          ls -lh data/analysis/final_report.md
 
           python - <<'PY'
           import pandas as pd
 
-          file = "data/analysis/final_report.csv"
+          csv_file = "data/analysis/final_report.csv"
 
-          df = pd.read_csv(file)
-
-          print(f"ROWS             : {len(df)}")
-          print(f"TICKERS          : {df['ticker'].nunique()}")
+          df = pd.read_csv(csv_file)
 
           print()
-          print("FINAL DECISION COUNTS")
-          print("------------------------------------------")
-
-          if "final_decision" in df.columns:
-              print(df["final_decision"].value_counts())
-          elif "decision" in df.columns:
-              print(df["decision"].value_counts())
-          else:
-              print("Decision column not found")
+          print("ROWS              :", len(df))
+          print("TICKERS           :", df["ticker"].nunique())
+          print(
+              "DECISION SCORE    :",
+              df["decision_score"].notna().sum()
+          )
+          print(
+              "DECISION VALID    :",
+              df["decision"].notna().sum()
+          )
 
           print()
-          print("STEP 10 OUTPUT : OK")
-          print("==========================================")
+          print("DECISION SUMMARY")
+          print("----------------------------------------")
+
+          print(
+              df["decision"]
+              .value_counts()
+              .to_string()
+          )
+
+          print()
+          print("FINAL REPORT : OK")
           PY
 
       - name: Save STEP 10 result to GitHub
         run: |
+
           echo "=========================================="
           echo "SAVE STEP 10 RESULT"
           echo "=========================================="
@@ -98,21 +108,42 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add data/analysis/final_report.csv
+          git add \
+            data/analysis/final_report.csv \
+            data/analysis/final_report.md
 
           if git diff --cached --quiet; then
+
             echo "No changes to commit."
+
           else
-            git commit -m "Add STEP 10 final report"
+
+            git commit \
+              -m "Add STEP 10 final report"
+
+            echo "PUSH ATTEMPT : 1"
+
+            git pull --rebase origin main
+
             git push
+
+            echo "PUSH SUCCESS"
+
           fi
 
       - name: STEP 10 Complete
         run: |
+
           echo "=========================================="
           echo "🔥 STEP 10 FINAL REPORT COMPLETE"
           echo "=========================================="
 
-          echo "final_report.csv saved to:"
+          echo "CSV:"
           echo "data/analysis/final_report.csv"
 
+          echo ""
+          echo "MARKDOWN:"
+          echo "data/analysis/final_report.md"
+
+          echo ""
+          echo "STEP 10 STATUS : SUCCESS"
