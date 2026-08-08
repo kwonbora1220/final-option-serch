@@ -1,0 +1,45 @@
+name: STEP 3 - Data Normalization
+
+on:
+  workflow_dispatch:
+
+jobs:
+  normalizer:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Download STEP 2 raw data
+        uses: actions/download-artifact@v4
+        with:
+          name: option-raw-data
+          path: data/raw
+
+      - name: Check raw data
+        run: |
+          echo "Checking STEP 2 data..."
+          ls -lh data/raw
+          echo "--------------------------------"
+          python -c "import pandas as pd; df=pd.read_csv('data/raw/options_raw.csv'); print('ROWS:', len(df)); print('COLUMNS:', len(df.columns)); print('DTE:', df['DTE'].min(), '~', df['DTE'].max())"
+
+      - name: Run Data Normalizer
+        run: |
+          python src/03_normalizer.py
+
+      - name: Upload normalized data
+        uses: actions/upload-artifact@v4
+        with:
+          name: option-normalized-data
+          path: data/normalized/options_normalized.csv
