@@ -1,4 +1,5 @@
-name: STEP 8 - Option Structure
+
+name: STEP 8 - Structure Analysis
 
 on:
   workflow_dispatch:
@@ -21,7 +22,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Check STEP 8 inputs
+      - name: STEP 8 Input Check
         run: |
           echo "=========================================="
           echo "STEP 8 INPUT CHECK"
@@ -29,42 +30,18 @@ jobs:
 
           test -f data/analysis/options_greeks.csv
           test -f data/analysis/top20.csv
-
-          ls -lh data/analysis/
+          test -f data/analysis/option_search.csv
+          test -f data/analysis/unusual_flow.csv
 
           echo "INPUT FILES : OK"
 
-      - name: Inspect TOP20 columns
-        run: |
-          python - <<'PY'
-          import pandas as pd
+          ls -lh data/analysis/
 
-          file = "data/analysis/top20.csv"
-
-          df = pd.read_csv(file)
-
-          print("==========================================")
-          print("TOP20 COLUMN CHECK")
-          print("==========================================")
-
-          print("ROWS:", len(df))
-
-          print("COLUMNS:")
-          for col in df.columns:
-              print(repr(col))
-
-          print()
-          print("FIRST 3 ROWS:")
-          print(df.head(3).to_string(index=False))
-
-          print("==========================================")
-          PY
-
-      - name: Run Option Structure
+      - name: Run STEP 8 Structure Analysis
         run: |
           python src/08_structure.py
 
-      - name: Check STEP 8 output
+      - name: STEP 8 Output Check
         run: |
           echo "=========================================="
           echo "STEP 8 OUTPUT CHECK"
@@ -83,31 +60,38 @@ jobs:
           print(f"TICKERS          : {df['ticker'].nunique()}")
 
           print(
-              "CALL WALL VALID   :",
-              df["call_wall"].notna().sum()
+              f"CALL WALL VALID   : "
+              f"{df['call_wall'].notna().sum()}"
           )
 
           print(
-              "PUT WALL VALID    :",
-              df["put_wall"].notna().sum()
+              f"PUT WALL VALID    : "
+              f"{df['put_wall'].notna().sum()}"
           )
 
           print(
-              "NET GEX VALID     :",
-              df["net_gex"].notna().sum()
+              f"NET GEX VALID     : "
+              f"{df['net_gex'].notna().sum()}"
           )
 
           print(
-              "STRUCTURE VALID   :",
-              df["structure"].notna().sum()
+              f"STRUCTURE VALID   : "
+              f"{df['structure'].notna().sum()}"
           )
 
           print("STEP 8 OUTPUT : OK")
           PY
 
-      - name: Upload STEP 8 structure
+      - name: Upload STEP 8 Structure Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: option-structure
+          name: structure-data
           path: data/analysis/structure.csv
+          if-no-files-found: error
 
+      - name: STEP 8 Complete
+        run: |
+          echo "=========================================="
+          echo "🔥 STEP 8 STRUCTURE COMPLETE"
+          echo "=========================================="
+          echo "structure.csv uploaded as artifact: structure-data"
