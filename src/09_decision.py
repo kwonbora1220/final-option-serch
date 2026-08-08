@@ -6,7 +6,7 @@ import pandas as pd
 
 
 # ============================================================
-# CONFIG
+# STEP 9 - DECISION ENGINE
 # ============================================================
 
 BASE_DIR = os.path.dirname(
@@ -29,11 +29,6 @@ STRUCTURE_FILE = os.path.join(
 FLOW_FILE = os.path.join(
     ANALYSIS_DIR,
     "unusual_flow.csv"
-)
-
-SEARCH_FILE = os.path.join(
-    ANALYSIS_DIR,
-    "option_search.csv"
 )
 
 TOP20_FILE = os.path.join(
@@ -70,10 +65,13 @@ def log(message):
 
 
 # ============================================================
-# HELPERS
+# COLUMN FINDER
 # ============================================================
 
-def find_column(df, candidates):
+def find_column(
+    df,
+    candidates
+):
 
     normalized = {
         str(col)
@@ -100,7 +98,14 @@ def find_column(df, candidates):
     return None
 
 
-def numeric(df, column):
+# ============================================================
+# NUMERIC
+# ============================================================
+
+def numeric(
+    df,
+    column
+):
 
     if column is None:
 
@@ -115,41 +120,59 @@ def numeric(df, column):
     )
 
 
-def normalize_ticker(df):
+# ============================================================
+# FILE CHECK
+# ============================================================
 
-    column = find_column(
-        df,
-        [
-            "ticker",
-            "symbol",
-            "underlying",
-            "underlying_symbol"
-        ]
-    )
+def check_files():
 
-    if column is None:
+    print()
+    print("=" * 72)
+    print("STEP 9 REQUIRED FILE CHECK")
+    print("=" * 72)
 
-        raise ValueError(
-            "Ticker column not found"
+    files = {
+        "MARKET REGIME": MARKET_FILE,
+        "STRUCTURE": STRUCTURE_FILE,
+        "UNUSUAL FLOW": FLOW_FILE,
+        "TOP20": TOP20_FILE,
+    }
+
+    for name, path in files.items():
+
+        exists = os.path.exists(path)
+
+        print(
+            f"{name:<20} : "
+            f"{'OK' if exists else 'MISSING'}"
         )
 
-    result = df.copy()
+        print(
+            f"  {path}"
+        )
 
-    result["_ticker"] = (
-        result[column]
-        .astype(str)
-        .str.upper()
-        .str.strip()
-    )
+        if not exists:
 
-    return result
+            raise FileNotFoundError(
+                f"{name} file not found: {path}"
+            )
+
+    print("=" * 72)
 
 
 # ============================================================
-# MARKET
+# STEP 1 MARKET REGIME
+#
+# IMPORTANT:
+# market_regime.csv DOES NOT HAVE TICKER.
+# It is ONE GLOBAL MARKET RESULT.
 # ============================================================
 
 def load_market_regime():
+
+    log(
+        "Loading STEP 1 market regime"
+    )
 
     df = pd.read_csv(
         MARKET_FILE
@@ -161,27 +184,37 @@ def load_market_regime():
             "market_regime.csv is empty"
         )
 
+    print()
+    print("=" * 72)
+    print("STEP 1 MARKET REGIME CHECK")
+    print("=" * 72)
+
+    print(
+        f"ROWS : {len(df)}"
+    )
+
+    print(
+        f"COLUMNS : {df.columns.tolist()}"
+    )
+
+    # --------------------------------------------------------
+    # MARKET SCORE
+    # --------------------------------------------------------
+
     score_col = find_column(
         df,
         [
             "market_score",
-            "score",
-            "market_regime_score"
-        ]
-    )
-
-    regime_col = find_column(
-        df,
-        [
-            "market_regime",
-            "regime"
+            "market_regime_score",
+            "score"
         ]
     )
 
     if score_col is None:
 
         raise ValueError(
-            "market_score missing"
+            "market_score column not found "
+            "in market_regime.csv"
         )
 
     scores = pd.to_numeric(
@@ -192,43 +225,151 @@ def load_market_regime():
     if scores.empty:
 
         raise ValueError(
-            "No valid market score"
+            "No valid market_score found"
         )
 
-    score = float(
+    market_score = float(
         scores.iloc[-1]
     )
 
-    if not 0 <= score <= 100:
+    if (
+        market_score < 0
+        or market_score > 100
+    ):
 
         raise ValueError(
-            f"Invalid market score: {score}"
+            f"Invalid market score: "
+            f"{market_score}"
         )
 
-    regime = "UNKNOWN"
+    # --------------------------------------------------------
+    # REGIME
+    # --------------------------------------------------------
+
+    regime_col = find_column(
+        df,
+        [
+            "regime",
+            "market_regime"
+        ]
+    )
 
     if regime_col is not None:
 
-        values = (
+        regimes = (
             df[regime_col]
             .dropna()
             .astype(str)
             .str.strip()
         )
 
-        if not values.empty:
+        if not regimes.empty:
 
-            regime = values.iloc[-1]
+            market_regime = (
+                regimes.iloc[-1]
+            )
 
-    log(
-        f"MARKET SCORE : {score:.2f}"
+        else:
+
+            market_regime = "UNKNOWN"
+
+    else:
+
+        market_regime = "UNKNOWN"
+
+    # --------------------------------------------------------
+    # INDEX DIRECTIONS
+    # --------------------------------------------------------
+
+    latest = df.iloc[-1]
+
+    direction_columns = {
+        "ndx_direction": [
+            "ndx_direction"
+        ],
+        "spy_direction": [
+            "spy_direction"
+        ],
+        "soxx_direction": [
+            "soxx_direction"
+        ],
+        "dia_direction": [
+            "dia_direction"
+        ]
+    }
+
+    directions = {}
+
+    for key, candidates in (
+        direction_columns.items()
+    ):
+
+        column = find_column(
+            df,
+            candidates
+        )
+
+        if column is None:
+
+            directions[key] = (
+                "UNAVAILABLE"
+            )
+
+        else:
+
+            value = latest[column]
+
+            if pd.isna(value):
+
+                directions[key] = (
+                    "UNAVAILABLE"
+                )
+
+            else:
+
+                directions[key] = (
+                    str(value)
+                    .strip()
+                    .upper()
+                )
+
+    print(
+        f"MARKET SCORE : "
+        f"{market_score:.2f}"
     )
 
-    log(
-        f"MARKET REGIME : {regime}"
+    print(
+        f"MARKET REGIME : "
+        f"{market_regime}"
     )
 
-    return score, regime
+    print(
+        f"NDX  : "
+        f"{directions['ndx_direction']}"
+    )
+
+    print(
+        f"SPY  : "
+        f"{directions['spy_direction']}"
+    )
+
+    print(
+        f"SOXX : "
+        f"{directions['soxx_direction']}"
+    )
+
+    print(
+        f"DIA  : "
+        f"{directions['dia_direction']}"
+    )
+
+    print("=" * 72)
+
+    return {
+        "score": market_score,
+        "regime": market_regime,
+        **directions
+    }
 
 
 # ============================================================
@@ -237,7 +378,23 @@ def load_market_regime():
 
 def prepare_flow(df):
 
-    df = normalize_ticker(df)
+    ticker_col = find_column(
+        df,
+        [
+            "ticker",
+            "symbol",
+            "underlying",
+            "underlying_symbol",
+            "stock"
+        ]
+    )
+
+    if ticker_col is None:
+
+        raise ValueError(
+            "Ticker column missing "
+            "in unusual_flow.csv"
+        )
 
     score_col = find_column(
         df,
@@ -248,85 +405,148 @@ def prepare_flow(df):
         ]
     )
 
+    premium_col = find_column(
+        df,
+        [
+            "premium",
+            "estimated_premium",
+            "estimated_traded_premium",
+            "premium_flow",
+            "total_premium"
+        ]
+    )
+
+    volume_oi_col = find_column(
+        df,
+        [
+            "volume_oi",
+            "volume_oi_ratio",
+            "vol_oi"
+        ]
+    )
+
     result = pd.DataFrame()
 
-    result["_ticker"] = df["_ticker"]
+    result["ticker"] = (
+        df[ticker_col]
+        .astype(str)
+        .str.upper()
+        .str.strip()
+    )
 
     result["flow_score"] = numeric(
         df,
         score_col
     )
 
-    return (
+    result["premium"] = numeric(
+        df,
+        premium_col
+    )
+
+    result["volume_oi"] = numeric(
+        df,
+        volume_oi_col
+    )
+
+    grouped = (
         result
         .groupby(
-            "_ticker",
+            "ticker",
             as_index=False
         )
         .agg({
-            "flow_score": "max"
+            "flow_score": "max",
+            "premium": "sum",
+            "volume_oi": "max"
         })
     )
 
+    return grouped
+
 
 # ============================================================
-# OPTION SEARCH
+# TOP20
 # ============================================================
 
-def prepare_search(df):
+def load_top20():
 
-    df = normalize_ticker(df)
+    df = pd.read_csv(
+        TOP20_FILE
+    )
 
-    score_col = find_column(
+    if df.empty:
+
+        raise ValueError(
+            "top20.csv is empty"
+        )
+
+    ticker_col = find_column(
         df,
         [
-            "option_search_score",
-            "search_score",
-            "score"
+            "ticker",
+            "symbol",
+            "underlying",
+            "underlying_symbol",
+            "stock",
+            "stock_symbol"
         ]
     )
 
-    signal_col = find_column(
-        df,
-        [
-            "signal",
-            "option_signal",
-            "search_signal"
-        ]
-    )
+    if ticker_col is None:
 
-    result = pd.DataFrame()
+        for col in df.columns:
 
-    result["_ticker"] = df["_ticker"]
+            values = (
+                df[col]
+                .dropna()
+                .astype(str)
+                .str.upper()
+                .str.strip()
+            )
 
-    result["option_search_score"] = numeric(
-        df,
-        score_col
-    )
+            sample = values.head(20)
 
-    if signal_col is not None:
+            if len(sample) == 0:
+                continue
 
-        result["option_signal"] = (
-            df[signal_col]
-            .astype(str)
-            .str.strip()
+            valid = sample.str.match(
+                r"^[A-Z]{1,6}$"
+            ).sum()
+
+            if valid >= 2:
+
+                ticker_col = col
+                break
+
+    if ticker_col is None:
+
+        print(
+            "TOP20 COLUMNS:"
         )
 
-    else:
+        for col in df.columns:
 
-        result["option_signal"] = ""
+            print(
+                repr(col)
+            )
 
-    return (
-        result
-        .groupby(
-            "_ticker",
-            as_index=False
+        raise ValueError(
+            "Unable to identify "
+            "TOP20 ticker column"
         )
-        .agg({
-            "option_search_score": "max",
-            "option_signal": "first"
-        })
+
+    tickers = (
+        df[ticker_col]
+        .dropna()
+        .astype(str)
+        .str.upper()
+        .str.strip()
+        .drop_duplicates()
+        .tolist()
     )
+
+    return tickers
 
 
 # ============================================================
@@ -335,27 +555,71 @@ def prepare_search(df):
 
 def prepare_structure(df):
 
-    df = normalize_ticker(df)
+    ticker_col = find_column(
+        df,
+        [
+            "ticker",
+            "symbol",
+            "underlying"
+        ]
+    )
+
+    if ticker_col is None:
+
+        raise ValueError(
+            "Ticker column missing "
+            "in structure.csv"
+        )
 
     result = pd.DataFrame()
 
-    result["_ticker"] = df["_ticker"]
+    result["ticker"] = (
+        df[ticker_col]
+        .astype(str)
+        .str.upper()
+        .str.strip()
+    )
 
-    for field in [
-        "current_price",
-        "call_wall",
-        "put_wall",
-        "support",
-        "resistance",
-        "net_gex"
-    ]:
+    columns = {
+
+        "current_price": [
+            "current_price",
+            "price",
+            "spot"
+        ],
+
+        "call_wall": [
+            "call_wall"
+        ],
+
+        "put_wall": [
+            "put_wall"
+        ],
+
+        "support": [
+            "support"
+        ],
+
+        "resistance": [
+            "resistance"
+        ],
+
+        "net_gex": [
+            "net_gex",
+            "gex"
+        ]
+    }
+
+    for target, candidates in (
+        columns.items()
+    ):
 
         column = find_column(
             df,
-            [field]
+            candidates
         )
 
-        result[field] = numeric(
+        result[target] = numeric(
             df,
             column
         )
@@ -372,6 +636,7 @@ def prepare_structure(df):
 
         result["structure"] = (
             df[structure_col]
+            .fillna("UNAVAILABLE")
             .astype(str)
             .str.strip()
         )
@@ -386,47 +651,27 @@ def prepare_structure(df):
 
 
 # ============================================================
-# TOP20
-# ============================================================
-
-def load_top20():
-
-    df = normalize_ticker(
-        pd.read_csv(
-            TOP20_FILE
-        )
-    )
-
-    return (
-        df["_ticker"]
-        .drop_duplicates()
-        .tolist()
-    )
-
-
-# ============================================================
 # DECISION ENGINE
 # ============================================================
 
 def calculate_decision(
     market_score,
     flow_score,
-    search_score,
     net_gex,
-    structure,
-    special_score=0
+    structure
 ):
 
-    score = 0.0
+    score = 50.0
+
     reasons = []
 
-    # ========================================================
-    # MARKET : 20
-    # ========================================================
+    # --------------------------------------------------------
+    # MARKET
+    # --------------------------------------------------------
 
     if market_score >= 70:
 
-        score += 20
+        score += 15
 
         reasons.append(
             "Strong bullish market regime"
@@ -434,23 +679,23 @@ def calculate_decision(
 
     elif market_score >= 55:
 
-        score += 15
+        score += 8
 
         reasons.append(
             "Positive market regime"
         )
 
-    elif market_score >= 45:
+    elif market_score <= 30:
 
-        score += 10
+        score -= 15
 
         reasons.append(
-            "Neutral market regime"
+            "Risk-off market regime"
         )
 
-    elif market_score >= 30:
+    elif market_score < 45:
 
-        score += 5
+        score -= 8
 
         reasons.append(
             "Weak market regime"
@@ -459,26 +704,18 @@ def calculate_decision(
     else:
 
         reasons.append(
-            "Risk-off market regime"
+            "Neutral market regime"
         )
 
-    # ========================================================
-    # FLOW : 25
-    # ========================================================
+    # --------------------------------------------------------
+    # FLOW
+    # --------------------------------------------------------
 
     if not pd.isna(flow_score):
 
-        score += (
-            max(
-                0,
-                min(
-                    100,
-                    flow_score
-                )
-            ) * 0.25
-        )
-
         if flow_score >= 80:
+
+            score += 15
 
             reasons.append(
                 "Very strong unusual option flow"
@@ -486,17 +723,23 @@ def calculate_decision(
 
         elif flow_score >= 60:
 
+            score += 10
+
             reasons.append(
                 "Strong unusual option flow"
             )
 
         elif flow_score >= 40:
 
+            score += 5
+
             reasons.append(
                 "Moderate unusual option flow"
             )
 
-        else:
+        elif flow_score < 20:
+
+            score -= 8
 
             reasons.append(
                 "Weak unusual option flow"
@@ -508,121 +751,73 @@ def calculate_decision(
             "Flow score unavailable"
         )
 
-    # ========================================================
-    # OPTION SEARCH : 25
-    # ========================================================
-
-    if not pd.isna(search_score):
-
-        score += (
-            max(
-                0,
-                min(
-                    100,
-                    search_score
-                )
-            ) * 0.25
-        )
-
-        if search_score >= 80:
-
-            reasons.append(
-                "Strong actionable option setup"
-            )
-
-        elif search_score >= 60:
-
-            reasons.append(
-                "Good option setup"
-            )
-
-        elif search_score < 40:
-
-            reasons.append(
-                "Weak option setup"
-            )
-
-    else:
-
-        reasons.append(
-            "Option search unavailable"
-        )
-
-    # ========================================================
-    # STRUCTURE / GEX : 20
-    # ========================================================
-
-    structure_text = str(
-        structure
-    ).upper()
-
-    structure_points = 0
-
-    if "BULLISH" in structure_text:
-
-        structure_points += 12
-
-        reasons.append(
-            "Bullish option structure"
-        )
-
-    elif "BEARISH" in structure_text:
-
-        structure_points -= 8
-
-        reasons.append(
-            "Bearish option structure"
-        )
-
-    elif "NEUTRAL" in structure_text:
-
-        structure_points += 5
-
-        reasons.append(
-            "Neutral option structure"
-        )
+    # --------------------------------------------------------
+    # GEX
+    # --------------------------------------------------------
 
     if not pd.isna(net_gex):
 
         if net_gex > 0:
 
-            structure_points += 8
-
             reasons.append(
-                "Positive GEX"
+                "Positive calculated GEX"
             )
 
         elif net_gex < 0:
 
-            structure_points -= 4
+            score -= 3
 
             reasons.append(
-                "Negative GEX"
+                "Negative calculated GEX"
             )
 
-    score += max(
-        0,
-        min(
-            20,
-            structure_points
-        )
-    )
-
-    # ========================================================
-    # SPECIAL STRUCTURE
-    # ========================================================
-
-    if special_score > 0:
-
-        score += special_score
+    else:
 
         reasons.append(
-            "SPECIAL OPTION STRUCTURE detected"
+            "GEX unavailable"
         )
 
-    # ========================================================
+    # --------------------------------------------------------
+    # STRUCTURE
+    # --------------------------------------------------------
+
+    text = str(
+        structure
+    ).upper()
+
+    if "BULLISH" in text:
+
+        score += 8
+
+        reasons.append(
+            "Bullish option structure"
+        )
+
+    elif "BEARISH" in text:
+
+        score -= 8
+
+        reasons.append(
+            "Bearish option structure"
+        )
+
+    elif "STABILIZED" in text:
+
+        reasons.append(
+            "Positive GEX stabilization structure"
+        )
+
+    elif "HIGHER VOLATILITY" in text:
+
+        score -= 3
+
+        reasons.append(
+            "Higher volatility structure"
+        )
+
+    # --------------------------------------------------------
     # BOUNDS
-    # ========================================================
+    # --------------------------------------------------------
 
     score = max(
         0,
@@ -632,27 +827,9 @@ def calculate_decision(
         )
     )
 
-    # ========================================================
-    # MARKET HARD FILTER
-    # ========================================================
-
-    if market_score < 30:
-
-        decision = "🔴 회피"
-
-        reasons.append(
-            "Market regime below entry threshold"
-        )
-
-        return (
-            score,
-            decision,
-            reasons
-        )
-
-    # ========================================================
+    # --------------------------------------------------------
     # FINAL
-    # ========================================================
+    # --------------------------------------------------------
 
     if score >= 70:
 
@@ -681,60 +858,86 @@ def main():
 
     log("START")
 
-    required = [
-        STRUCTURE_FILE,
-        FLOW_FILE,
-        SEARCH_FILE,
-        TOP20_FILE,
-        MARKET_FILE
+    # --------------------------------------------------------
+    # FILE CHECK
+    # --------------------------------------------------------
+
+    check_files()
+
+    # --------------------------------------------------------
+    # MARKET
+    # --------------------------------------------------------
+
+    market = load_market_regime()
+
+    market_score = market[
+        "score"
     ]
 
-    for path in required:
+    market_regime = market[
+        "regime"
+    ]
 
-        if not os.path.exists(path):
+    # --------------------------------------------------------
+    # STRUCTURE
+    # --------------------------------------------------------
 
-            raise FileNotFoundError(
-                path
-            )
+    log(
+        "Loading structure"
+    )
 
-    market_score, market_regime = (
-        load_market_regime()
+    structure_raw = pd.read_csv(
+        STRUCTURE_FILE
     )
 
     structure = prepare_structure(
-        pd.read_csv(
-            STRUCTURE_FILE
-        )
+        structure_raw
+    )
+
+    log(
+        f"STRUCTURE ROWS : "
+        f"{len(structure)}"
+    )
+
+    # --------------------------------------------------------
+    # FLOW
+    # --------------------------------------------------------
+
+    log(
+        "Loading unusual flow"
+    )
+
+    flow_raw = pd.read_csv(
+        FLOW_FILE
     )
 
     flow = prepare_flow(
-        pd.read_csv(
-            FLOW_FILE
-        )
+        flow_raw
     )
 
-    search = prepare_search(
-        pd.read_csv(
-            SEARCH_FILE
-        )
+    log(
+        f"FLOW TICKERS : "
+        f"{len(flow)}"
+    )
+
+    # --------------------------------------------------------
+    # TOP20
+    # --------------------------------------------------------
+
+    log(
+        "Loading TOP20"
     )
 
     top20 = load_top20()
 
-    flow_lookup = (
-        flow
-        .set_index("_ticker")
+    log(
+        f"TOP20 TICKERS : "
+        f"{len(top20)}"
     )
 
-    search_lookup = (
-        search
-        .set_index("_ticker")
-    )
-
-    structure_lookup = (
-        structure
-        .set_index("_ticker")
-    )
+    # --------------------------------------------------------
+    # DECISION
+    # --------------------------------------------------------
 
     rows = []
 
@@ -743,61 +946,56 @@ def main():
         start=1
     ):
 
-        if ticker not in structure_lookup.index:
+        structure_row = (
+            structure[
+                structure["ticker"]
+                == ticker
+            ]
+        )
+
+        if structure_row.empty:
 
             log(
-                f"{ticker} | STRUCTURE MISSING"
+                f"{ticker} | "
+                "STRUCTURE MISSING"
             )
 
             continue
 
-        s = structure_lookup.loc[
-            ticker
-        ]
+        flow_row = (
+            flow[
+                flow["ticker"]
+                == ticker
+            ]
+        )
 
-        if ticker in flow_lookup.index:
+        s = structure_row.iloc[0]
+
+        if flow_row.empty:
+
+            flow_score = np.nan
+
+        else:
 
             flow_score = (
-                flow_lookup.loc[
-                    ticker,
+                flow_row.iloc[0][
                     "flow_score"
                 ]
             )
 
-        else:
+        (
+            score,
+            decision,
+            reasons
+        ) = calculate_decision(
+            market_score,
+            flow_score,
+            s["net_gex"],
+            s["structure"]
+        )
 
-            flow_score = np.nan
-
-        if ticker in search_lookup.index:
-
-            search_score = (
-                search_lookup.loc[
-                    ticker,
-                    "option_search_score"
-                ]
-            )
-
-            option_signal = (
-                search_lookup.loc[
-                    ticker,
-                    "option_signal"
-                ]
-            )
-
-        else:
-
-            search_score = np.nan
-            option_signal = ""
-
-        score, decision, reasons = (
-            calculate_decision(
-                market_score,
-                flow_score,
-                search_score,
-                s["net_gex"],
-                s["structure"],
-                0
-            )
+        reason_text = (
+            " | ".join(reasons)
         )
 
         rows.append({
@@ -812,14 +1010,28 @@ def main():
             "market_regime":
                 market_regime,
 
+            "ndx_direction":
+                market[
+                    "ndx_direction"
+                ],
+
+            "spy_direction":
+                market[
+                    "spy_direction"
+                ],
+
+            "soxx_direction":
+                market[
+                    "soxx_direction"
+                ],
+
+            "dia_direction":
+                market[
+                    "dia_direction"
+                ],
+
             "flow_score":
                 flow_score,
-
-            "option_search_score":
-                search_score,
-
-            "option_signal":
-                option_signal,
 
             "current_price":
                 s["current_price"],
@@ -842,12 +1054,6 @@ def main():
             "structure":
                 s["structure"],
 
-            "special_structure":
-                "",
-
-            "special_score":
-                0,
-
             "decision_score":
                 score,
 
@@ -855,18 +1061,22 @@ def main():
                 decision,
 
             "reason":
-                " | ".join(reasons),
+                reason_text,
 
             "data_source":
                 "CALCULATED"
-
         })
 
         log(
             f"{ticker} | "
+            f"MARKET {market_score:.1f} | "
             f"SCORE {score:.1f} | "
             f"{decision}"
         )
+
+    # --------------------------------------------------------
+    # OUTPUT
+    # --------------------------------------------------------
 
     output = pd.DataFrame(
         rows
@@ -898,33 +1108,72 @@ def main():
         index=False
     )
 
+    # --------------------------------------------------------
+    # VALIDATION
+    # --------------------------------------------------------
+
     print()
     print("=" * 72)
     print("🔎 STEP 9 VALIDATION")
     print("=" * 72)
 
     print(
-        f"MARKET SCORE       : {market_score:.2f}"
+        f"STEP 1 MARKET SCORE : "
+        f"{market_score:.2f}"
     )
 
     print(
-        f"MARKET REGIME      : {market_regime}"
+        f"STEP 1 MARKET REGIME: "
+        f"{market_regime}"
     )
 
     print(
-        f"TOP20 INPUT        : {len(top20)}"
+        f"TOP20 INPUT         : "
+        f"{len(top20)}"
     )
 
     print(
-        f"DECISION ROWS      : {len(output)}"
+        f"DECISION ROWS       : "
+        f"{len(output)}"
     )
 
     print(
-        f"SCORES VALID       : "
+        f"DECISION TICKERS    : "
+        f"{output['ticker'].nunique()}"
+    )
+
+    print(
+        "SCORES VALID        : "
         f"{output['decision_score'].notna().sum()}"
     )
 
+    print(
+        "DECISIONS VALID     : "
+        f"{output['decision'].notna().sum()}"
+    )
+
     print()
+    print("DECISION SUMMARY")
+    print("----------------------------------------")
+
+    for decision in [
+        "🟢 진입",
+        "🟡 관망",
+        "🔴 회피"
+    ]:
+
+        count = (
+            output["decision"]
+            == decision
+        ).sum()
+
+        print(
+            f"{decision} : {count}"
+        )
+
+    print()
+    print("TOP DECISIONS")
+    print("----------------------------------------")
 
     print(
         output[
@@ -933,7 +1182,6 @@ def main():
                 "ticker",
                 "market_score",
                 "flow_score",
-                "option_search_score",
                 "decision_score",
                 "decision"
             ]
@@ -954,6 +1202,10 @@ def main():
         "STEP 9 DECISION COMPLETE"
     )
 
+
+# ============================================================
+# RUN
+# ============================================================
 
 if __name__ == "__main__":
     main()
