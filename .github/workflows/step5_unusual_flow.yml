@@ -1,0 +1,63 @@
+name: STEP 5 - Unusual Option Flow
+
+on:
+  workflow_dispatch:
+
+jobs:
+  unusual-flow:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Check Greeks Data
+        run: |
+          echo "=========================================="
+          echo "STEP 4 INPUT CHECK"
+          echo "=========================================="
+
+          ls -lh data/analysis/
+
+          python -c "import pandas as pd; df=pd.read_csv('data/analysis/options_greeks.csv'); print('ROWS       :', len(df)); print('COLUMNS    :', len(df.columns)); print('TICKERS    :', df['symbol'].nunique()); print('DTE MIN    :', df['DTE'].min()); print('DTE MAX    :', df['DTE'].max())"
+
+      - name: Run Unusual Flow Engine
+        run: |
+          python src/05_unusual_flow.py
+
+      - name: Check Unusual Flow Output
+        run: |
+          echo "=========================================="
+          echo "STEP 5 OUTPUT CHECK"
+          echo "=========================================="
+
+          ls -lh data/analysis/
+
+          python -c "import pandas as pd; df=pd.read_csv('data/analysis/unusual_flow.csv'); print('ROWS       :', len(df)); print('COLUMNS    :', len(df.columns)); print('TICKERS    :', df['symbol'].nunique()); print('FLOW SCORE :', df['flow_score'].notna().sum()); print('BUY EST.   :', (df['trade_side_estimate']=='BUY EST.').sum()); print('SELL EST.  :', (df['trade_side_estimate']=='SELL EST.').sum())"
+
+      - name: Save Unusual Flow Data To Repository
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add data/analysis/unusual_flow.csv
+
+          git diff --cached --quiet || git commit -m "Add unusual option flow analysis"
+
+          git push
+
+      - name: Upload Unusual Flow Data
+        uses: actions/upload-artifact@v4
+        with:
+          name: unusual-flow-data
+          path: data/analysis/unusual_flow.csv
