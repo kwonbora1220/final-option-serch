@@ -1,136 +1,253 @@
-name: STEP 11 - SPECIAL LIST
+name: STEP 11 - CALL BUY + PUT SELL
 
 on:
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
-  special-list:
+  call-buy-put-sell:
+
     runs-on: ubuntu-latest
 
     steps:
 
       # ============================================================
-      # 1. CHECKOUT
+      # CHECKOUT
       # ============================================================
 
       - name: Checkout repository
         uses: actions/checkout@v4
 
       # ============================================================
-      # 2. PYTHON
+      # PYTHON
       # ============================================================
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       # ============================================================
-      # 3. INSTALL
+      # DEPENDENCIES
       # ============================================================
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas numpy
+          pip install -r requirements.txt
 
       # ============================================================
-      # 4. CHECK INPUT FILES
+      # STEP 11 INPUT CHECK
       # ============================================================
 
-      - name: Check STEP 11 input files
+      - name: STEP 11 Input Check
         run: |
-          echo "=============================================="
-          echo "STEP 11 INPUT FILE CHECK"
-          echo "=============================================="
 
-          echo ""
-          echo "[CHECK] final_report.csv"
-          test -f data/analysis/final_report.csv
-          ls -lh data/analysis/final_report.csv
+          echo "=========================================="
+          echo "STEP 11 INPUT CHECK"
+          echo "=========================================="
 
-          echo ""
-          echo "[CHECK] unusual_flow.csv"
+          test -f data/analysis/options_greeks.csv
           test -f data/analysis/unusual_flow.csv
-          ls -lh data/analysis/unusual_flow.csv
+          test -f data/analysis/top20.csv
+          test -f data/analysis/decision.csv
 
           echo ""
-          echo "[CHECK] option_search.csv"
-          test -f data/analysis/option_search.csv
-          ls -lh data/analysis/option_search.csv
+          echo "INPUT FILES : OK"
 
           echo ""
-          echo "[CHECK] structure.csv"
-          test -f data/analysis/structure.csv
-          ls -lh data/analysis/structure.csv
-
-          echo ""
-          echo "INPUT FILE CHECK COMPLETE"
+          echo "INPUT FILES:"
+          ls -lh \
+            data/analysis/options_greeks.csv \
+            data/analysis/unusual_flow.csv \
+            data/analysis/top20.csv \
+            data/analysis/decision.csv
 
       # ============================================================
-      # 5. SHOW FILE STRUCTURE
+      # RUN STEP 11
       # ============================================================
 
-      - name: Show analysis directory
+      - name: Run STEP 11 CALL BUY + PUT SELL
         run: |
-          echo "=============================================="
-          echo "DATA / ANALYSIS"
-          echo "=============================================="
 
-          find data/analysis -maxdepth 1 -type f -print | sort
+          echo "=========================================="
+          echo "STEP 11 CALL BUY + PUT SELL"
+          echo "=========================================="
+
+          python src/11_call_buy_put_sell.py
 
       # ============================================================
-      # 6. RUN STEP 11
+      # OUTPUT CHECK
       # ============================================================
 
-      - name: Run STEP 11 SPECIAL LIST
+      - name: STEP 11 Output Check
         run: |
-          echo "=============================================="
-          echo "RUNNING STEP 11 SPECIAL LIST"
-          echo "=============================================="
 
-          python 02_PROGRAM/11_special_list.py
+          echo "=========================================="
+          echo "STEP 11 OUTPUT CHECK"
+          echo "=========================================="
+
+          test -f data/analysis/call_buy_put_sell.csv
+
+          echo "OUTPUT FILE : OK"
+
+          ls -lh \
+            data/analysis/call_buy_put_sell.csv
+
+          python - <<'PY'
+          import pandas as pd
+
+          file = (
+              "data/analysis/"
+              "call_buy_put_sell.csv"
+          )
+
+          df = pd.read_csv(file)
+
+          print()
+          print("=" * 72)
+          print("STEP 11 OUTPUT VALIDATION")
+          print("=" * 72)
+
+          print(
+              f"ROWS              : {len(df)}"
+          )
+
+          if not df.empty:
+
+              print(
+                  f"TICKERS           : "
+                  f"{df['ticker'].nunique()}"
+              )
+
+              print(
+                  "STRUCTURE VALID   :",
+                  df["structure"].notna().sum()
+              )
+
+              print(
+                  "SCORE VALID       :",
+                  df["structure_score"].notna().sum()
+              )
+
+              print()
+              print(
+                  "STRUCTURE SUMMARY"
+              )
+
+              print(
+                  "----------------------------------------"
+              )
+
+              print(
+                  df["structure"]
+                  .value_counts()
+                  .to_string()
+              )
+
+              print()
+              print(
+                  "TOP STRUCTURES"
+              )
+
+              print(
+                  "----------------------------------------"
+              )
+
+              print(
+                  df[
+                      [
+                          "final_rank",
+                          "ticker",
+                          "decision",
+                          "call_buy_volume",
+                          "put_sell_volume",
+                          "call_buy_premium",
+                          "put_sell_premium",
+                          "structure_score"
+                      ]
+                  ].to_string(
+                      index=False
+                  )
+              )
+
+          else:
+
+              print()
+              print(
+                  "NO CALL BUY + PUT SELL "
+                  "STRUCTURES FOUND."
+              )
+
+              print(
+                  "EMPTY RESULT IS VALID."
+              )
+
+          print()
+          print(
+              "STEP 11 OUTPUT : OK"
+          )
+
+          print("=" * 72)
+          PY
 
       # ============================================================
-      # 7. VALIDATE OUTPUT
+      # SAVE
       # ============================================================
 
-      - name: Validate SPECIAL LIST
+      - name: Save STEP 11 result to GitHub
         run: |
-          echo "=============================================="
-          echo "STEP 11 OUTPUT VALIDATION"
-          echo "=============================================="
 
-          test -f data/analysis/special_list.csv
+          echo "=========================================="
+          echo "SAVE STEP 11 RESULT"
+          echo "=========================================="
 
-          echo ""
-          echo "SPECIAL LIST FILE:"
-          ls -lh data/analysis/special_list.csv
-
-          echo ""
-          echo "SPECIAL LIST CONTENT:"
-          cat data/analysis/special_list.csv
-
-          echo ""
-          echo "STEP 11 OUTPUT VALIDATION COMPLETE"
-
-      # ============================================================
-      # 8. COMMIT RESULT
-      # ============================================================
-
-      - name: Commit SPECIAL LIST
-        run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add data/analysis/special_list.csv
+          git add \
+            data/analysis/call_buy_put_sell.csv
 
           if git diff --cached --quiet; then
-            echo "No changes to special_list.csv"
+
+            echo "No changes to commit."
+            echo "PUSH ATTEMPT : 0"
+            echo "Everything up-to-date"
+
           else
-            git commit -m "Add STEP 11 special list"
-            git push
+
+            git commit \
+              -m "Add STEP 11 CALL BUY PUT SELL structure"
+
+            echo "PUSH ATTEMPT : 1"
+
+            git pull \
+              --rebase \
+              origin main
+
+            git push origin main
+
+            echo "PUSH SUCCESS"
+
           fi
+
+      # ============================================================
+      # COMPLETE
+      # ============================================================
+
+      - name: STEP 11 Complete
+        run: |
+
+          echo "=========================================="
+          echo "🔥 STEP 11 COMPLETE"
+          echo "=========================================="
+
+          echo ""
+          echo "OUTPUT:"
+          echo "data/analysis/call_buy_put_sell.csv"
+
+          echo ""
+          echo "STRUCTURE:"
+          echo "CALL BUY + PUT SELL"
+
+          echo ""
+          echo "STEP 11 STATUS : SUCCESS"
