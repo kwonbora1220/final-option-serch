@@ -1,0 +1,63 @@
+name: STEP 7 - TOP20 Option Search
+
+on:
+  workflow_dispatch:
+
+jobs:
+  option-search:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Check STEP 6 and STEP 4 Inputs
+        run: |
+          echo "=========================================="
+          echo "STEP 7 INPUT CHECK"
+          echo "=========================================="
+
+          ls -lh data/analysis/
+
+          python -c "import pandas as pd; top=pd.read_csv('data/analysis/top20.csv'); opt=pd.read_csv('data/analysis/options_greeks.csv'); print('TOP20 ROWS       :', len(top)); print('TOP20 TICKERS    :', top['symbol'].nunique()); print('OPTION ROWS      :', len(opt)); print('OPTION TICKERS   :', opt['symbol'].nunique()); print('DTE MIN          :', opt['DTE'].min()); print('DTE MAX          :', opt['DTE'].max())"
+
+      - name: Run Option Search
+        run: |
+          python src/07_option_search.py
+
+      - name: Check STEP 7 Output
+        run: |
+          echo "=========================================="
+          echo "STEP 7 OUTPUT CHECK"
+          echo "=========================================="
+
+          ls -lh data/analysis/
+
+          python -c "import pandas as pd; df=pd.read_csv('data/analysis/option_search.csv'); print('ROWS             :', len(df)); print('TICKERS          :', df['symbol'].nunique()); print('DTE MIN SEARCH   :', df['dte_min'].min()); print('DTE MAX SEARCH   :', df['dte_max'].max()); print('RISK REVERSALS   :', (df['risk_reversal']!='NONE DETECTED').sum())"
+
+      - name: Save Option Search
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add data/analysis/option_search.csv
+
+          git diff --cached --quiet || git commit -m "Add TOP20 option search analysis"
+
+          git push
+
+      - name: Upload Option Search Data
+        uses: actions/upload-artifact@v4
+        with:
+          name: option-search-data
+          path: data/analysis/option_search.csv
