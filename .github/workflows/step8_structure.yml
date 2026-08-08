@@ -79,19 +79,32 @@ jobs:
               f"{df['structure'].notna().sum()}"
           )
 
+          print()
           print("STEP 8 OUTPUT : OK")
           PY
 
-      - name: Upload STEP 8 Structure Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: structure-data
-          path: data/analysis/structure.csv
-          if-no-files-found: error
+      - name: Save STEP 8 result to GitHub
+        run: |
+          echo "=========================================="
+          echo "SAVE STEP 8 RESULT"
+          echo "=========================================="
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add data/analysis/structure.csv
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Add STEP 8 structure analysis"
+            git push
+          fi
 
       - name: STEP 8 Complete
         run: |
           echo "=========================================="
           echo "🔥 STEP 8 STRUCTURE COMPLETE"
           echo "=========================================="
-          echo "structure.csv uploaded as artifact: structure-data"
+          echo "structure.csv saved to GitHub:"
+          echo "data/analysis/structure.csv"
