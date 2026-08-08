@@ -1,4 +1,3 @@
-
 import os
 from datetime import datetime, timezone
 
@@ -6,8 +5,14 @@ import numpy as np
 import pandas as pd
 
 
+# ============================================================
+# CONFIG
+# ============================================================
+
 BASE_DIR = os.path.dirname(
-    os.path.dirname(os.path.abspath(__file__))
+    os.path.dirname(
+        os.path.abspath(__file__)
+    )
 )
 
 ANALYSIS_DIR = os.path.join(
@@ -32,17 +37,35 @@ OUTPUT_FILE = os.path.join(
 )
 
 
+# ============================================================
+# LOG
+# ============================================================
+
 def log(message):
-    now = datetime.now(timezone.utc).strftime(
+
+    now = datetime.now(
+        timezone.utc
+    ).strftime(
         "%Y-%m-%d %H:%M:%S UTC"
     )
-    print(f"[08 STRUCTURE] {now} | {message}")
 
+    print(
+        f"[08 STRUCTURE] {now} | {message}"
+    )
+
+
+# ============================================================
+# HELPERS
+# ============================================================
 
 def find_column(df, candidates):
 
     normalized = {
-        str(col).strip().lower().replace(" ", "_"): col
+        str(col)
+        .strip()
+        .lower()
+        .replace(" ", "_")
+        .replace("-", "_"): col
         for col in df.columns
     }
 
@@ -53,6 +76,7 @@ def find_column(df, candidates):
             .strip()
             .lower()
             .replace(" ", "_")
+            .replace("-", "_")
         )
 
         if key in normalized:
@@ -64,6 +88,7 @@ def find_column(df, candidates):
 def numeric(df, column):
 
     if column is None:
+
         return pd.Series(
             np.nan,
             index=df.index
@@ -74,6 +99,10 @@ def numeric(df, column):
         errors="coerce"
     )
 
+
+# ============================================================
+# PREPARE GREEKS
+# ============================================================
 
 def prepare_greeks(df):
 
@@ -112,7 +141,7 @@ def prepare_greeks(df):
             "underlying_price",
             "spot",
             "stock_price",
-            "price"
+            "underlying_last"
         ]
     )
 
@@ -140,8 +169,6 @@ def prepare_greeks(df):
         ]
     )
 
-    result = pd.DataFrame(index=df.index)
-
     if ticker_col is None:
         raise ValueError(
             "Ticker column not found in options_greeks.csv"
@@ -149,13 +176,15 @@ def prepare_greeks(df):
 
     if type_col is None:
         raise ValueError(
-            "Option type column not found in options_greeks.csv"
+            "Option type column not found"
         )
 
     if strike_col is None:
         raise ValueError(
-            "Strike column not found in options_greeks.csv"
+            "Strike column not found"
         )
+
+    result = pd.DataFrame(index=df.index)
 
     result["ticker"] = (
         df[ticker_col]
@@ -203,9 +232,11 @@ def prepare_greeks(df):
     return result
 
 
-def extract_top20_tickers(df):
+# ============================================================
+# TOP20
+# ============================================================
 
-    log("Detecting TOP20 ticker column")
+def extract_top20_tickers(df):
 
     candidates = [
         "ticker",
@@ -213,8 +244,7 @@ def extract_top20_tickers(df):
         "underlying",
         "underlying_symbol",
         "stock",
-        "stock_symbol",
-        "name"
+        "stock_symbol"
     ]
 
     column = find_column(
@@ -223,9 +253,6 @@ def extract_top20_tickers(df):
     )
 
     if column is None:
-
-        # Last-resort automatic detection:
-        # find a column containing common US ticker-like values.
 
         for col in df.columns:
 
@@ -237,10 +264,10 @@ def extract_top20_tickers(df):
                 .str.strip()
             )
 
-            if len(values) == 0:
-                continue
-
             sample = values.head(20)
+
+            if sample.empty:
+                continue
 
             valid = sample.str.match(
                 r"^[A-Z]{1,6}$"
@@ -256,23 +283,9 @@ def extract_top20_tickers(df):
 
     if column is None:
 
-        print()
-        print("=" * 72)
-        print("TOP20 AVAILABLE COLUMNS")
-        print("=" * 72)
-
-        for col in df.columns:
-            print(repr(col))
-
-        print("=" * 72)
-
         raise ValueError(
-            "Unable to identify ticker column in top20.csv"
+            "Unable to identify TOP20 ticker column"
         )
-
-    log(
-        f"TOP20 TICKER COLUMN : {column}"
-    )
 
     tickers = (
         df[column]
@@ -280,21 +293,22 @@ def extract_top20_tickers(df):
         .astype(str)
         .str.upper()
         .str.strip()
+        .drop_duplicates()
         .tolist()
-    )
-
-    tickers = list(
-        dict.fromkeys(tickers)
-    )
-
-    log(
-        f"TOP20 TICKERS : {len(tickers)}"
     )
 
     return tickers
 
 
-def calculate_wall(group, option_type):
+# ============================================================
+# WALL CALCULATION
+# ============================================================
+
+def calculate_wall(
+    group,
+    option_type,
+    current_price
+):
 
     data = group[
         group["option_type"] == option_type
@@ -307,36 +321,72 @@ def calculate_wall(group, option_type):
     if data.empty:
         return np.nan
 
-    data["score"] = 0.0
+    # --------------------------------------------------------
+    # Directional filter
+    # --------------------------------------------------------
+
+    if not pd.isna(current_price):
+
+        if option_type == "CALL":
+
+            directional = data[
+                data["strike"] >= current_price
+            ]
+
+        else:
+
+            directional = data[
+                data["strike"] <= current_price
+            ]
+
+        if not directional.empty:
+            data = directional
+
+    # --------------------------------------------------------
+    # Components
+    # --------------------------------------------------------
 
     gex = data["gex"].abs().fillna(0)
-
-    if gex.max() > 0:
-        data["score"] += (
-            gex / gex.max()
-        )
-
     oi = data["open_interest"].fillna(0)
-
-    if oi.max() > 0:
-        data["score"] += (
-            oi / oi.max()
-        ) * 0.5
-
     volume = data["volume"].fillna(0)
 
-    if volume.max() > 0:
-        data["score"] += (
-            volume / volume.max()
-        ) * 0.25
+    def normalize(series):
 
-    return float(
-        data.sort_values(
-            "score",
-            ascending=False
-        ).iloc[0]["strike"]
+        maximum = series.max()
+
+        if pd.isna(maximum) or maximum <= 0:
+
+            return pd.Series(
+                0.0,
+                index=series.index
+            )
+
+        return series / maximum
+
+    data["gex_score"] = normalize(gex)
+    data["oi_score"] = normalize(oi)
+    data["volume_score"] = normalize(volume)
+
+    # GEX 중심
+    data["wall_score"] = (
+        data["gex_score"] * 0.50
+        + data["oi_score"] * 0.30
+        + data["volume_score"] * 0.20
     )
 
+    data = data.sort_values(
+        "wall_score",
+        ascending=False
+    )
+
+    return float(
+        data.iloc[0]["strike"]
+    )
+
+
+# ============================================================
+# SUPPORT / RESISTANCE
+# ============================================================
 
 def calculate_support_resistance(
     group,
@@ -344,98 +394,217 @@ def calculate_support_resistance(
 ):
 
     if pd.isna(current_price):
+
         return np.nan, np.nan
 
-    strikes = (
-        group["strike"]
-        .dropna()
-        .unique()
+    data = group.dropna(
+        subset=["strike"]
+    ).copy()
+
+    if data.empty:
+
+        return np.nan, np.nan
+
+    # --------------------------------------------------------
+    # Aggregate by strike
+    # --------------------------------------------------------
+
+    grouped = (
+        data
+        .groupby(
+            ["option_type", "strike"],
+            as_index=False
+        )
+        .agg({
+            "gex": lambda x: x.abs().sum(),
+            "open_interest": "sum",
+            "volume": "sum"
+        })
     )
 
-    strikes = sorted(
-        float(x)
-        for x in strikes
+    grouped["strength"] = (
+        grouped["gex"].fillna(0)
+        + grouped["open_interest"].fillna(0) * 0.01
+        + grouped["volume"].fillna(0) * 0.10
     )
 
-    below = [
-        x for x in strikes
-        if x < current_price
-    ]
+    below = grouped[
+        grouped["strike"] < current_price
+    ].copy()
 
-    above = [
-        x for x in strikes
-        if x > current_price
-    ]
+    above = grouped[
+        grouped["strike"] > current_price
+    ].copy()
 
-    support = (
-        max(below)
-        if below
-        else np.nan
-    )
+    support = np.nan
+    resistance = np.nan
 
-    resistance = (
-        min(above)
-        if above
-        else np.nan
-    )
+    if not below.empty:
+
+        support = float(
+            below.sort_values(
+                "strength",
+                ascending=False
+            ).iloc[0]["strike"]
+        )
+
+    if not above.empty:
+
+        resistance = float(
+            above.sort_values(
+                "strength",
+                ascending=False
+            ).iloc[0]["strike"]
+        )
 
     return support, resistance
 
+
+# ============================================================
+# STRUCTURE CLASSIFICATION
+# ============================================================
 
 def classify_structure(
     current_price,
     support,
     resistance,
+    call_wall,
+    put_wall,
     net_gex
 ):
 
     if pd.isna(current_price):
+
         return "UNAVAILABLE"
 
-    if pd.isna(support) or pd.isna(resistance):
-        return "MIXED STRUCTURE"
+    if (
+        pd.isna(call_wall)
+        and pd.isna(put_wall)
+    ):
+
+        return "UNAVAILABLE"
+
+    # --------------------------------------------------------
+    # GEX
+    # --------------------------------------------------------
 
     if net_gex > 0:
-        return "STABILIZED STRUCTURE"
 
-    if net_gex < 0:
-        return "HIGHER VOLATILITY STRUCTURE"
+        gex_state = "POSITIVE GEX"
 
-    return "MIXED STRUCTURE"
+    elif net_gex < 0:
 
+        gex_state = "NEGATIVE GEX"
+
+    else:
+
+        gex_state = "NEUTRAL GEX"
+
+    # --------------------------------------------------------
+    # Price position
+    # --------------------------------------------------------
+
+    if (
+        not pd.isna(support)
+        and current_price > support
+    ):
+
+        support_state = "ABOVE SUPPORT"
+
+    else:
+
+        support_state = "SUPPORT RISK"
+
+    if (
+        not pd.isna(resistance)
+        and current_price < resistance
+    ):
+
+        resistance_state = "BELOW RESISTANCE"
+
+    else:
+
+        resistance_state = "RESISTANCE RISK"
+
+    # --------------------------------------------------------
+    # Bullish / Bearish
+    # --------------------------------------------------------
+
+    bullish = 0
+    bearish = 0
+
+    if not pd.isna(put_wall):
+
+        if current_price > put_wall:
+            bullish += 1
+
+        else:
+            bearish += 1
+
+    if not pd.isna(call_wall):
+
+        if current_price < call_wall:
+            bullish += 1
+
+        else:
+            bearish += 1
+
+    if net_gex > 0:
+        bullish += 1
+
+    elif net_gex < 0:
+        bearish += 1
+
+    if bullish >= 2:
+
+        direction = "BULLISH"
+
+    elif bearish >= 2:
+
+        direction = "BEARISH"
+
+    else:
+
+        direction = "NEUTRAL"
+
+    return (
+        f"{direction} | "
+        f"{gex_state} | "
+        f"{support_state} | "
+        f"{resistance_state}"
+    )
+
+
+# ============================================================
+# MAIN
+# ============================================================
 
 def main():
 
     log("START")
 
     if not os.path.exists(GREEKS_FILE):
+
         raise FileNotFoundError(
             GREEKS_FILE
         )
 
     if not os.path.exists(TOP20_FILE):
+
         raise FileNotFoundError(
             TOP20_FILE
         )
 
-    log("Loading Greeks data")
-
     greeks_raw = pd.read_csv(
         GREEKS_FILE
     )
-
-    log(
-        f"GREEKS ROWS : {len(greeks_raw):,}"
-    )
-
-    log("Loading TOP20")
 
     top20 = pd.read_csv(
         TOP20_FILE
     )
 
     log(
-        f"TOP20 ROWS : {len(top20)}"
+        f"GREEKS ROWS : {len(greeks_raw):,}"
     )
 
     top_tickers = extract_top20_tickers(
@@ -453,22 +622,24 @@ def main():
     ].copy()
 
     if greeks.empty:
+
         raise ValueError(
             "No TOP20 option data matched"
         )
 
     rows = []
 
-    for ticker in top_tickers:
+    for rank, ticker in enumerate(
+        top_tickers,
+        start=1
+    ):
 
         group = greeks[
             greeks["ticker"] == ticker
         ].copy()
 
         if group.empty:
-            log(
-                f"{ticker} | NO OPTION DATA"
-            )
+
             continue
 
         prices = (
@@ -477,19 +648,21 @@ def main():
         )
 
         current_price = (
-            prices.iloc[0]
+            prices.median()
             if not prices.empty
             else np.nan
         )
 
         call_wall = calculate_wall(
             group,
-            "CALL"
+            "CALL",
+            current_price
         )
 
         put_wall = calculate_wall(
             group,
-            "PUT"
+            "PUT",
+            current_price
         )
 
         support, resistance = (
@@ -515,11 +688,17 @@ def main():
             .sum(min_count=1)
         )
 
-        if pd.isna(call_gex):
-            call_gex = 0.0
+        call_gex = (
+            0.0
+            if pd.isna(call_gex)
+            else float(call_gex)
+        )
 
-        if pd.isna(put_gex):
-            put_gex = 0.0
+        put_gex = (
+            0.0
+            if pd.isna(put_gex)
+            else float(put_gex)
+        )
 
         net_gex = (
             call_gex + put_gex
@@ -529,32 +708,46 @@ def main():
             current_price,
             support,
             resistance,
+            call_wall,
+            put_wall,
             net_gex
         )
 
         rows.append({
 
+            "rank": rank,
+
             "ticker": ticker,
 
-            "current_price": current_price,
+            "current_price":
+                current_price,
 
-            "call_wall": call_wall,
+            "call_wall":
+                call_wall,
 
-            "put_wall": put_wall,
+            "put_wall":
+                put_wall,
 
-            "support": support,
+            "support":
+                support,
 
-            "resistance": resistance,
+            "resistance":
+                resistance,
 
-            "call_gex": call_gex,
+            "call_gex":
+                call_gex,
 
-            "put_gex": put_gex,
+            "put_gex":
+                put_gex,
 
-            "net_gex": net_gex,
+            "net_gex":
+                net_gex,
 
-            "structure": structure,
+            "structure":
+                structure,
 
-            "data_source": "CALCULATED"
+            "data_source":
+                "CALCULATED"
 
         })
 
@@ -563,7 +756,7 @@ def main():
             f"PRICE {current_price} | "
             f"CALL WALL {call_wall} | "
             f"PUT WALL {put_wall} | "
-            f"NET GEX {net_gex:.4f} | "
+            f"GEX {net_gex:.4f} | "
             f"{structure}"
         )
 
@@ -587,42 +780,34 @@ def main():
     print("=" * 72)
 
     print(
-        f"INPUT GREEKS ROWS : "
-        f"{len(greeks_raw):,}"
+        f"INPUT GREEKS ROWS : {len(greeks_raw):,}"
     )
 
     print(
-        f"TOP20 TICKERS     : "
-        f"{len(top_tickers)}"
+        f"TOP20 TICKERS     : {len(top_tickers)}"
     )
 
     print(
-        f"STRUCTURE ROWS    : "
-        f"{len(output)}"
+        f"STRUCTURE ROWS    : {len(output)}"
     )
 
     print(
-        f"STRUCTURE TICKERS : "
-        f"{output['ticker'].nunique()}"
-    )
-
-    print(
-        "CALL WALL VALID   : "
+        f"CALL WALL VALID   : "
         f"{output['call_wall'].notna().sum()}"
     )
 
     print(
-        "PUT WALL VALID    : "
+        f"PUT WALL VALID    : "
         f"{output['put_wall'].notna().sum()}"
     )
 
     print(
-        "NET GEX VALID     : "
+        f"NET GEX VALID     : "
         f"{output['net_gex'].notna().sum()}"
     )
 
     print(
-        "STRUCTURE VALID   : "
+        f"STRUCTURE VALID   : "
         f"{output['structure'].notna().sum()}"
     )
 
@@ -640,4 +825,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
