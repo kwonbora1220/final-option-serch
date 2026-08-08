@@ -35,6 +35,26 @@ jobs:
 
           echo "INPUT FILES : OK"
 
+      - name: Inspect TOP20 columns
+        run: |
+          python - <<'PY'
+          import pandas as pd
+
+          df = pd.read_csv("data/analysis/top20.csv")
+
+          print("==========================================")
+          print("TOP20 COLUMN CHECK")
+          print("==========================================")
+          print("COLUMNS:")
+          for col in df.columns:
+              print(repr(col))
+
+          print()
+          print("FIRST ROW:")
+          print(df.head(1).to_string(index=False))
+          print("==========================================")
+          PY
+
       - name: Run Option Structure
         run: |
           python src/08_structure.py
