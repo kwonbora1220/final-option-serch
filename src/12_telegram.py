@@ -1,42 +1,34 @@
-
 # ============================================================
 # OPTION FLOW SCANNER
 #
-# TELEGRAM BOT + STEP 12 REPORTER
+# STEP 12 - TELEGRAM FINAL REPORTER
 #
-# 기능
+# IMPORTANT
 # ------------------------------------------------------------
-# 1. /start
-# 2. /scan TICKER
-# 3. STEP 12 FINAL REPORT
+# STEP 1 ~ STEP 11 결과는 변경하지 않는다.
+# data/analysis/*.csv만 읽는다.
 #
-# Telegram Report Order
-# ------------------------------------------------------------
-# 1. 🔥🔥 FINAL TRADING LIST
-# 2. 🔥 CALL BUY + PUT SELL
-# 3. 🌎 MARKET REGIME
-# 4. 🎯 MARKET REGIME SCORE
-# 5. 🔥 UNUSUAL OPTION FLOW
-# 6. 🔥 TOP 20 OPTION SEARCH
-# 7. 🥇 TOP 종목 상세 분석
-# 8. ⚠️ DATA DISCLAIMER
-# 9. 🏁 SCAN COMPLETE
+# GitHub Actions
+#     ↓
+# STEP 12
+#     ↓
+# CSV READ
+#     ↓
+# FINAL REPORT
+#     ↓
+# TELEGRAM
+#     ↓
+# EXIT
 #
-# DATA CLASSIFICATION
-# ------------------------------------------------------------
-# REAL
-# CALCULATED
-# ESTIMATED
-# UNAVAILABLE
+# NO getUpdates
+# NO /start
+# NO /scan
+# NO infinite loop
 # ============================================================
 
 import csv
 import json
 import os
-import subprocess
-import sys
-import time
-import urllib.parse
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone
@@ -44,23 +36,6 @@ from datetime import datetime, timezone
 
 # ============================================================
 # CONFIG
-# ============================================================
-
-TOKEN = os.environ.get(
-    "TELEGRAM_BOT_TOKEN",
-    ""
-)
-
-CHAT_ID = os.environ.get(
-    "TELEGRAM_CHAT_ID",
-    ""
-)
-
-TELEGRAM_LIMIT = 3900
-
-
-# ============================================================
-# PATH
 # ============================================================
 
 BASE_DIR = os.path.dirname(
@@ -75,12 +50,18 @@ DATA_DIR = os.path.join(
     "analysis"
 )
 
-OPTION_SEARCH_SCRIPT = os.path.join(
-    os.path.dirname(
-        os.path.abspath(__file__)
-    ),
-    "option_search.py"
+TELEGRAM_BOT_TOKEN = os.environ.get(
+    "TELEGRAM_BOT_TOKEN",
+    ""
 )
+
+TELEGRAM_CHAT_ID = os.environ.get(
+    "TELEGRAM_CHAT_ID",
+    ""
+)
+
+# Telegram 안전 전송 길이
+TELEGRAM_LIMIT = 3900
 
 
 # ============================================================
@@ -148,106 +129,8 @@ def log(message):
     )
 
     print(
-        f"[TELEGRAM] {now} | {message}",
-        flush=True
+        f"[STEP 12] {now} | {message}"
     )
-
-
-# ============================================================
-# TELEGRAM API
-# ============================================================
-
-def api(method, data=None):
-
-    if not TOKEN:
-        raise RuntimeError(
-            "TELEGRAM_BOT_TOKEN 없음"
-        )
-
-    url = (
-        "https://api.telegram.org/"
-        f"bot{TOKEN}/{method}"
-    )
-
-    if data is None:
-        data = {}
-
-    encoded = urllib.parse.urlencode(
-        data
-    ).encode("utf-8")
-
-    request = urllib.request.Request(
-        url,
-        data=encoded,
-        headers={
-            "Content-Type":
-                "application/x-www-form-urlencoded"
-        },
-        method="POST"
-    )
-
-    try:
-
-        with urllib.request.urlopen(
-            request,
-            timeout=30
-        ) as response:
-
-            body = response.read().decode(
-                "utf-8"
-            )
-
-        result = json.loads(body)
-
-        if not result.get("ok"):
-
-            raise RuntimeError(
-                f"Telegram API ERROR: {result}"
-            )
-
-        return result
-
-    except urllib.error.HTTPError as exc:
-
-        try:
-            body = exc.read().decode(
-                "utf-8"
-            )
-        except Exception:
-            body = ""
-
-        raise RuntimeError(
-            f"Telegram HTTP {exc.code}: {body}"
-        )
-
-
-# ============================================================
-# SEND MESSAGE
-# ============================================================
-
-def send_message(
-    chat_id,
-    text
-):
-
-    if not text:
-        return
-
-    result = api(
-        "sendMessage",
-        {
-            "chat_id": chat_id,
-            "text": text
-        }
-    )
-
-    log(
-        "MESSAGE SENT | "
-        f"chat_id={chat_id} | "
-        f"length={len(text)}"
-    )
-
-    return result
 
 
 # ============================================================
@@ -259,7 +142,7 @@ def read_csv(path):
     if not os.path.exists(path):
 
         log(
-            "FILE NOT FOUND | "
+            "FILE NOT FOUND : "
             + os.path.relpath(
                 path,
                 BASE_DIR
@@ -277,12 +160,12 @@ def read_csv(path):
             newline=""
         ) as f:
 
-            rows = list(
-                csv.DictReader(f)
-            )
+            reader = csv.DictReader(f)
+
+            rows = list(reader)
 
         log(
-            "CSV LOADED | "
+            "LOADED : "
             + os.path.relpath(
                 path,
                 BASE_DIR
@@ -295,7 +178,7 @@ def read_csv(path):
     except Exception as exc:
 
         log(
-            "CSV ERROR | "
+            "CSV ERROR : "
             + str(exc)
         )
 
@@ -303,7 +186,7 @@ def read_csv(path):
 
 
 # ============================================================
-# NORMALIZATION
+# NORMALIZE
 # ============================================================
 
 def normalize_key(value):
@@ -323,11 +206,7 @@ def normalize_key(value):
     )
 
 
-def get_value(
-    row,
-    *names,
-    default=""
-):
+def get_value(row, *names, default=""):
 
     if not row:
         return default
@@ -398,11 +277,7 @@ def fmt_number(value):
     number = number_value(value)
 
     if number is None:
-
-        return (
-            text_value(value)
-            or "N/A"
-        )
+        return text_value(value) or "N/A"
 
     if number.is_integer():
 
@@ -416,48 +291,34 @@ def fmt_money(value):
     number = number_value(value)
 
     if number is None:
-
-        return (
-            text_value(value)
-            or "N/A"
-        )
+        return text_value(value) or "N/A"
 
     absolute = abs(number)
 
     if absolute >= 1_000_000_000:
 
-        return (
-            f"${number / 1_000_000_000:.2f}B"
-        )
+        return f"${number / 1_000_000_000:.2f}B"
 
     if absolute >= 1_000_000:
 
-        return (
-            f"${number / 1_000_000:.2f}M"
-        )
+        return f"${number / 1_000_000:.2f}M"
 
     if absolute >= 1_000:
 
-        return (
-            f"${number / 1_000:.1f}K"
-        )
+        return f"${number / 1_000:.1f}K"
 
     return f"${number:,.0f}"
 
 
 # ============================================================
-# DATA CLASSIFICATION
+# CLASSIFICATION
 # ============================================================
 
 def REAL(value):
 
     value = text_value(value)
 
-    return (
-        value
-        if value
-        else "N/A"
-    )
+    return value if value else "N/A"
 
 
 def CALCULATED(value):
@@ -467,9 +328,7 @@ def CALCULATED(value):
     if not value:
         return "N/A"
 
-    return (
-        f"{value} [CALCULATED]"
-    )
+    return f"{value} [CALCULATED]"
 
 
 def ESTIMATED(value):
@@ -479,9 +338,7 @@ def ESTIMATED(value):
     if not value:
         return "N/A"
 
-    return (
-        f"{value} [ESTIMATED]"
-    )
+    return f"{value} [ESTIMATED]"
 
 
 def UNAVAILABLE():
@@ -501,8 +358,7 @@ def symbol_of(row):
         "ticker",
         "underlying",
         "underlying_symbol",
-        "stock",
-        "name"
+        "stock"
     ).upper()
 
 
@@ -560,7 +416,6 @@ def status_emoji(value):
             "진입"
         )
     ):
-
         return "🟢"
 
     if any(
@@ -572,7 +427,6 @@ def status_emoji(value):
             "관망"
         )
     ):
-
         return "🟡"
 
     if any(
@@ -584,7 +438,6 @@ def status_emoji(value):
             "회피"
         )
     ):
-
         return "🔴"
 
     return "⚪"
@@ -594,42 +447,265 @@ def status_emoji(value):
 # FIND SYMBOL
 # ============================================================
 
-def find_symbol(
-    rows,
-    symbol
-):
+def find_symbol(rows, symbol):
 
     symbol = symbol.upper()
 
     for row in rows:
 
         if symbol_of(row) == symbol:
-
             return row
 
     return None
 
 
 # ============================================================
-# MARKET REGIME
+# 1. FINAL TRADING LIST
 # ============================================================
 
-def build_market_regime(rows):
+def build_final_list(rows):
 
     lines = [
-        "━━━━━━━━━━━━━━━━━━━━━━",
-        "🌎 MARKET REGIME",
+        "🔥🔥 FINAL TRADING LIST",
         "━━━━━━━━━━━━━━━━━━━━━━",
     ]
 
     if not rows:
 
         lines.append(
-            "⚪ MARKET REGIME : "
+            "⚪ FINAL REPORT : "
             + UNAVAILABLE()
         )
 
         return lines
+
+    for index, row in enumerate(
+        sorted_rows(rows)[:20],
+        start=1
+    ):
+
+        symbol = symbol_of(row)
+
+        if not symbol:
+            continue
+
+        decision = get_value(
+            row,
+            "decision",
+            "action",
+            "status",
+            "signal"
+        )
+
+        score = get_value(
+            row,
+            "score",
+            "final_score",
+            "decision_score",
+            "structure_score"
+        )
+
+        reason = get_value(
+            row,
+            "reason",
+            "reasons",
+            "summary"
+        )
+
+        if index == 1:
+            rank = "🥇"
+        elif index == 2:
+            rank = "🥈"
+        elif index == 3:
+            rank = "🥉"
+        else:
+            rank = f"{index}️⃣"
+
+        lines.append("")
+        lines.append(
+            f"{rank} {symbol}"
+        )
+
+        lines.append(
+            f"{status_emoji(decision)} "
+            f"{decision or 'UNAVAILABLE'}"
+        )
+
+        if score:
+
+            lines.append(
+                f"Score {score} [CALCULATED]"
+            )
+
+        if reason:
+
+            lines.append(
+                "📌 확인된 조건"
+            )
+
+            for part in reason.split("|"):
+
+                part = part.strip()
+
+                if part:
+                    lines.append(
+                        f"• {part}"
+                    )
+
+    return lines
+
+
+# ============================================================
+# 2. CALL BUY + PUT SELL
+# ============================================================
+
+def build_special(rows):
+
+    lines = [
+        "🔥 CALL BUY + PUT SELL",
+        "━━━━━━━━━━━━━━━━━━━━━━",
+    ]
+
+    if not rows:
+
+        lines.append(
+            "해당 구조 없음"
+        )
+
+        return lines
+
+    for index, row in enumerate(
+        sorted_rows(rows)[:20],
+        start=1
+    ):
+
+        symbol = symbol_of(row)
+
+        if not symbol:
+            continue
+
+        call = get_value(
+            row,
+            "call",
+            "call_contract",
+            "call_symbol",
+            "call_strike"
+        )
+
+        put = get_value(
+            row,
+            "put",
+            "put_contract",
+            "put_symbol",
+            "put_strike"
+        )
+
+        call_dte = get_value(
+            row,
+            "call_dte",
+            "dte"
+        )
+
+        put_dte = get_value(
+            row,
+            "put_dte",
+            "dte"
+        )
+
+        call_premium = get_value(
+            row,
+            "call_premium",
+            "call_premium_flow"
+        )
+
+        put_premium = get_value(
+            row,
+            "put_premium",
+            "put_premium_flow"
+        )
+
+        strength = get_value(
+            row,
+            "strength",
+            "score",
+            "structure_score"
+        )
+
+        lines.append("")
+        lines.append(
+            f"{index}. {symbol}"
+        )
+
+        if strength:
+
+            lines.append(
+                f"Strength : {strength} [CALCULATED]"
+            )
+
+        lines.append("")
+        lines.append(
+            "CALL BUY EST. 🟢"
+        )
+
+        if call:
+            lines.append(call)
+
+        if call_dte:
+            lines.append(
+                f"DTE {call_dte}"
+            )
+
+        if call_premium:
+
+            lines.append(
+                "Premium Flow "
+                + fmt_money(call_premium)
+                + " [CALCULATED]"
+            )
+
+        lines.append("")
+        lines.append(
+            "PUT SELL EST. 🔴"
+        )
+
+        if put:
+            lines.append(put)
+
+        if put_dte:
+            lines.append(
+                f"DTE {put_dte}"
+            )
+
+        if put_premium:
+
+            lines.append(
+                "Premium Flow "
+                + fmt_money(put_premium)
+                + " [CALCULATED]"
+            )
+
+        lines.append("")
+        lines.append(
+            "Structure"
+        )
+
+        lines.append(
+            "🔥 BULLISH RISK-REVERSAL"
+        )
+
+    return lines
+
+
+# ============================================================
+# 3. MARKET REGIME
+# ============================================================
+
+def build_market_regime(rows):
+
+    lines = [
+        "🌎 MARKET REGIME",
+        "━━━━━━━━━━━━━━━━━━━━━━",
+    ]
 
     preferred = [
         "NDX",
@@ -639,6 +715,7 @@ def build_market_regime(rows):
     ]
 
     ordered = []
+
     used = set()
 
     for ticker in preferred:
@@ -649,7 +726,6 @@ def build_market_regime(rows):
 
                 ordered.append(row)
                 used.add(id(row))
-
                 break
 
     for row in rows:
@@ -669,16 +745,14 @@ def build_market_regime(rows):
             row,
             "current_price",
             "price",
-            "close",
-            "current"
+            "close"
         )
 
         change = get_value(
             row,
             "change_percent",
             "percent_change",
-            "change_pct",
-            "pct_change"
+            "change_pct"
         )
 
         trend = get_value(
@@ -754,13 +828,12 @@ def build_market_regime(rows):
 
 
 # ============================================================
-# MARKET SCORE
+# 4. MARKET REGIME SCORE
 # ============================================================
 
 def build_market_score(rows):
 
     lines = [
-        "━━━━━━━━━━━━━━━━━━━━━━",
         "🎯 MARKET REGIME SCORE",
         "━━━━━━━━━━━━━━━━━━━━━━",
     ]
@@ -784,17 +857,17 @@ def build_market_score(rows):
             "market_score"
         )
 
-        if not symbol or not score:
-            continue
-
         trend = get_value(
             row,
             "trend",
             "regime"
         )
 
+        if not symbol or not score:
+            continue
+
         lines.append(
-            f"{symbol:<8}"
+            f"{symbol:<8} "
             f"{score}/100 "
             f"{status_emoji(trend)}"
         )
@@ -818,8 +891,7 @@ def build_market_score(rows):
             overall_regime = get_value(
                 row,
                 "overall_regime",
-                "market_regime",
-                "regime"
+                "market_regime"
             )
 
     if overall_score:
@@ -841,13 +913,12 @@ def build_market_score(rows):
 
 
 # ============================================================
-# UNUSUAL FLOW
+# 5. UNUSUAL OPTION FLOW
 # ============================================================
 
 def build_unusual_flow(rows):
 
     lines = [
-        "━━━━━━━━━━━━━━━━━━━━━━",
         "🔥 UNUSUAL OPTION FLOW",
         "━━━━━━━━━━━━━━━━━━━━━━",
     ]
@@ -862,13 +933,11 @@ def build_unusual_flow(rows):
             symbols.add(symbol)
 
     lines.append(
-        f"전체 분석 종목       "
-        f"{len(symbols):,}"
+        f"전체 분석 종목       {len(symbols):,}"
     )
 
     lines.append(
-        f"옵션 Flow 분석       "
-        f"{len(rows):,}"
+        f"옵션 Flow 분석       {len(rows):,}"
     )
 
     lines.append(
@@ -880,6 +949,7 @@ def build_unusual_flow(rows):
     )
 
     lines.append("")
+
     lines.append(
         "오늘 비정상 Flow TOP"
     )
@@ -919,13 +989,12 @@ def build_unusual_flow(rows):
 
 
 # ============================================================
-# TOP20
+# 6. TOP 20 OPTION SEARCH
 # ============================================================
 
 def build_top20(rows):
 
     lines = [
-        "━━━━━━━━━━━━━━━━━━━━━━",
         "🔥 TOP 20 OPTION SEARCH",
         "━━━━━━━━━━━━━━━━━━━━━━",
     ]
@@ -974,312 +1043,7 @@ def build_top20(rows):
 
 
 # ============================================================
-# FINAL TRADING LIST
-# ============================================================
-
-def build_final_list(rows):
-
-    lines = [
-        "━━━━━━━━━━━━━━━━━━━━━━",
-        "🔥🔥 FINAL TRADING LIST",
-        "━━━━━━━━━━━━━━━━━━━━━━",
-    ]
-
-    if not rows:
-
-        lines.append(
-            "⚪ FINAL REPORT : "
-            + UNAVAILABLE()
-        )
-
-        return lines
-
-    for index, row in enumerate(
-        sorted_rows(rows)[:20],
-        start=1
-    ):
-
-        symbol = symbol_of(row)
-
-        if not symbol:
-            continue
-
-        decision = get_value(
-            row,
-            "decision",
-            "action",
-            "status",
-            "signal"
-        )
-
-        score = get_value(
-            row,
-            "score",
-            "final_score",
-            "decision_score",
-            "structure_score"
-        )
-
-        reason = get_value(
-            row,
-            "reason",
-            "reasons",
-            "summary"
-        )
-
-        call = get_value(
-            row,
-            "call",
-            "call_contract",
-            "call_symbol"
-        )
-
-        put = get_value(
-            row,
-            "put",
-            "put_contract",
-            "put_symbol"
-        )
-
-        support = get_value(
-            row,
-            "support",
-            "support_level"
-        )
-
-        resistance = get_value(
-            row,
-            "resistance",
-            "resistance_level"
-        )
-
-        if index == 1:
-            rank = "🥇"
-        elif index == 2:
-            rank = "🥈"
-        elif index == 3:
-            rank = "🥉"
-        else:
-            rank = f"{index}️⃣"
-
-        lines.append("")
-        lines.append(
-            f"{rank} {symbol}"
-        )
-
-        lines.append(
-            f"{status_emoji(decision)} "
-            f"{decision or 'UNAVAILABLE'}"
-        )
-
-        if score:
-
-            lines.append(
-                f"Score {score}"
-            )
-
-        if reason:
-
-            lines.append(
-                "📌 확인된 조건"
-            )
-
-            for part in reason.split("|"):
-
-                part = part.strip()
-
-                if part:
-
-                    lines.append(
-                        f"• {part}"
-                    )
-
-        if call:
-
-            lines.append(
-                f"🎯 Call {call}"
-            )
-
-        if put:
-
-            lines.append(
-                f"🛡 Put {put}"
-            )
-
-        if support:
-
-            lines.append(
-                f"📐 Support "
-                f"{CALCULATED(support)}"
-            )
-
-        if resistance:
-
-            lines.append(
-                f"📐 Resistance "
-                f"{CALCULATED(resistance)}"
-            )
-
-    return lines
-
-
-# ============================================================
-# CALL BUY + PUT SELL
-# ============================================================
-
-def build_special(rows):
-
-    lines = [
-        "━━━━━━━━━━━━━━━━━━━━━━",
-        "🔥 CALL BUY + PUT SELL",
-        "━━━━━━━━━━━━━━━━━━━━━━",
-    ]
-
-    if not rows:
-
-        lines.append(
-            "해당 구조 없음"
-        )
-
-        return lines
-
-    for index, row in enumerate(
-        sorted_rows(rows)[:20],
-        start=1
-    ):
-
-        symbol = symbol_of(row)
-
-        if not symbol:
-            continue
-
-        call = get_value(
-            row,
-            "call",
-            "call_contract",
-            "call_symbol",
-            "call_strike"
-        )
-
-        put = get_value(
-            row,
-            "put",
-            "put_contract",
-            "put_symbol",
-            "put_strike"
-        )
-
-        call_dte = get_value(
-            row,
-            "call_dte",
-            "dte"
-        )
-
-        put_dte = get_value(
-            row,
-            "put_dte",
-            "dte"
-        )
-
-        call_premium = get_value(
-            row,
-            "call_premium",
-            "call_premium_flow"
-        )
-
-        put_premium = get_value(
-            row,
-            "put_premium",
-            "put_premium_flow"
-        )
-
-        strength = get_value(
-            row,
-            "strength",
-            "score",
-            "structure_score"
-        )
-
-        current_price = get_value(
-            row,
-            "current_price",
-            "price"
-        )
-
-        lines.append("")
-        lines.append(
-            f"{index}. {symbol}"
-        )
-
-        if strength:
-
-            lines.append(
-                f"Strength : {strength}"
-            )
-
-        lines.append("")
-        lines.append(
-            "CALL BUY EST. 🟢"
-        )
-
-        if call:
-            lines.append(call)
-
-        if call_dte:
-            lines.append(
-                f"DTE {call_dte}"
-            )
-
-        if call_premium:
-
-            lines.append(
-                "Premium Flow "
-                + fmt_money(call_premium)
-                + " [CALCULATED]"
-            )
-
-        lines.append("")
-        lines.append(
-            "PUT SELL EST. 🔴"
-        )
-
-        if put:
-            lines.append(put)
-
-        if put_dte:
-            lines.append(
-                f"DTE {put_dte}"
-            )
-
-        if put_premium:
-
-            lines.append(
-                "Premium Flow "
-                + fmt_money(put_premium)
-                + " [CALCULATED]"
-            )
-
-        lines.append("")
-        lines.append(
-            "Structure"
-        )
-
-        lines.append(
-            "🔥 BULLISH RISK-REVERSAL"
-        )
-
-        if current_price:
-
-            lines.append(
-                "Current Price "
-                + REAL(current_price)
-            )
-
-    return lines
-
-
-# ============================================================
-# TOP STOCK DETAIL
+# 7. TOP STOCK DETAIL
 # ============================================================
 
 def build_top_detail(
@@ -1291,23 +1055,19 @@ def build_top_detail(
 ):
 
     lines = [
-        "━━━━━━━━━━━━━━━━━━━━━━",
         "🥇 TOP 종목 상세 분석",
         "━━━━━━━━━━━━━━━━━━━━━━",
     ]
 
-    if not top20_rows:
+    top = sorted_rows(top20_rows)
+
+    if not top:
 
         lines.append(
             "⚪ TOP20 : "
             + UNAVAILABLE()
         )
 
-        return lines
-
-    top = sorted_rows(top20_rows)
-
-    if not top:
         return lines
 
     base = top[0]
@@ -1370,7 +1130,6 @@ def build_top_detail(
             part = part.strip()
 
             if part:
-
                 lines.append(
                     f"• {part}"
                 )
@@ -1399,9 +1158,7 @@ def build_top_detail(
 
     if alignment:
 
-        lines.append(
-            alignment
-        )
+        lines.append(alignment)
 
     else:
 
@@ -1415,9 +1172,6 @@ def build_top_detail(
     # --------------------------------------------------------
 
     lines.append("")
-    lines.append(
-        "━━━━━━━━━━━━━━━━━━━━━━"
-    )
     lines.append(
         "🎯 OPTION STRUCTURE"
     )
@@ -1455,28 +1209,24 @@ def build_top_detail(
         )
 
         if call_wall:
-
             lines.append(
                 f"CALL WALL "
                 f"{CALCULATED(call_wall)}"
             )
 
         if put_wall:
-
             lines.append(
                 f"PUT WALL "
                 f"{CALCULATED(put_wall)}"
             )
 
         if support:
-
             lines.append(
                 f"주요 지지 "
                 f"{CALCULATED(support)}"
             )
 
         if resistance:
-
             lines.append(
                 f"주요 저항 "
                 f"{CALCULATED(resistance)}"
@@ -1538,45 +1288,33 @@ def build_top_detail(
         )
 
         if iv:
-
             lines.append(
-                f"IV          "
-                f"{REAL(iv)} [REAL]"
+                f"IV          {REAL(iv)} [REAL]"
             )
 
         if delta:
-
             lines.append(
-                f"Delta       "
-                f"{REAL(delta)} [REAL]"
+                f"Delta       {REAL(delta)} [REAL]"
             )
 
         if gamma:
-
             lines.append(
-                f"Gamma       "
-                f"{CALCULATED(gamma)}"
+                f"Gamma       {CALCULATED(gamma)}"
             )
 
         if vanna:
-
             lines.append(
-                f"Vanna       "
-                f"{CALCULATED(vanna)}"
+                f"Vanna       {CALCULATED(vanna)}"
             )
 
         if charm:
-
             lines.append(
-                f"Charm       "
-                f"{CALCULATED(charm)}"
+                f"Charm       {CALCULATED(charm)}"
             )
 
         if gex:
-
             lines.append(
-                f"GEX         "
-                f"{CALCULATED(gex)}"
+                f"GEX         {CALCULATED(gex)}"
             )
 
     else:
@@ -1617,9 +1355,7 @@ def build_top_detail(
 
             calls.append(row)
 
-    calls = sorted_rows(calls)
-
-    for call in calls[:2]:
+    for call in sorted_rows(calls)[:2]:
 
         strike = get_value(
             call,
@@ -1668,8 +1404,8 @@ def build_top_detail(
 
         lines.append("")
         lines.append(
-            f"💚 ${strike or 'N/A'}C "
-            f"| DTE {dte or 'N/A'}"
+            f"💚 ${strike or 'N/A'}C | "
+            f"DTE {dte or 'N/A'}"
         )
 
         lines.append(
@@ -1680,25 +1416,21 @@ def build_top_detail(
         )
 
         if iv:
-
             lines.append(
                 f"IV {REAL(iv)} [REAL]"
             )
 
         if delta:
-
             lines.append(
                 f"Delta {REAL(delta)} [REAL]"
             )
 
         if gamma:
-
             lines.append(
                 f"Gamma {CALCULATED(gamma)}"
             )
 
         if premium:
-
             lines.append(
                 "Premium Flow "
                 + fmt_money(premium)
@@ -1740,9 +1472,7 @@ def build_top_detail(
 
             puts.append(row)
 
-    puts = sorted_rows(puts)
-
-    for put in puts[:2]:
+    for put in sorted_rows(puts)[:2]:
 
         strike = get_value(
             put,
@@ -1791,8 +1521,8 @@ def build_top_detail(
 
         lines.append("")
         lines.append(
-            f"❤️ ${strike or 'N/A'}P "
-            f"| DTE {dte or 'N/A'}"
+            f"❤️ ${strike or 'N/A'}P | "
+            f"DTE {dte or 'N/A'}"
         )
 
         lines.append(
@@ -1803,25 +1533,21 @@ def build_top_detail(
         )
 
         if iv:
-
             lines.append(
                 f"IV {REAL(iv)} [REAL]"
             )
 
         if delta:
-
             lines.append(
                 f"Delta {REAL(delta)} [REAL]"
             )
 
         if gamma:
-
             lines.append(
                 f"Gamma {CALCULATED(gamma)}"
             )
 
         if premium:
-
             lines.append(
                 "Premium Flow "
                 + fmt_money(premium)
@@ -1842,7 +1568,7 @@ def build_top_detail(
 
     lines.append("")
     lines.append(
-        "🔥 SPECIAL STRUCTURE"
+        "🔥 RISK-REVERSAL"
     )
 
     special = find_symbol(
@@ -1868,29 +1594,79 @@ def build_top_detail(
         else:
 
             lines.append(
-                "CALL BUY EST. + "
-                "PUT SELL EST."
+                "CALL BUY EST. + PUT SELL EST."
             )
 
     else:
 
         lines.append(
-            "CALL BUY EST. + "
-            "PUT SELL EST."
+            "CALL BUY EST. + PUT SELL EST."
         )
 
     lines.append(
-        "※ BUY/SELL 방향은 ESTIMATED"
+        "※ BUY / SELL 방향은 ESTIMATED"
     )
 
     # --------------------------------------------------------
-    # 종합 판단
+    # SUPPORT / RESISTANCE
     # --------------------------------------------------------
 
     lines.append("")
     lines.append(
-        "━━━━━━━━━━━━━━━━━━━━━━"
+        "🧭 SUPPORT / RESISTANCE"
     )
+
+    structure = find_symbol(
+        structure_rows,
+        symbol
+    )
+
+    if structure:
+
+        support = get_value(
+            structure,
+            "support",
+            "support_level"
+        )
+
+        resistance = get_value(
+            structure,
+            "resistance",
+            "resistance_level"
+        )
+
+        if current_price:
+
+            lines.append(
+                f"현재가 {REAL(current_price)}"
+            )
+
+        if support:
+
+            lines.append(
+                f"🟢 주요 지지 "
+                f"{CALCULATED(support)}"
+            )
+
+        if resistance:
+
+            lines.append(
+                f"🔴 주요 저항 "
+                f"{CALCULATED(resistance)}"
+            )
+
+    else:
+
+        lines.append(
+            "⚪ "
+            + UNAVAILABLE()
+        )
+
+    # --------------------------------------------------------
+    # SUMMARY
+    # --------------------------------------------------------
+
+    lines.append("")
     lines.append(
         "🧠 종합 판단"
     )
@@ -1920,7 +1696,6 @@ def build_top_detail(
                 part = part.strip()
 
                 if part:
-
                     lines.append(part)
 
         decision_value = get_value(
@@ -2011,39 +1786,42 @@ def build_top_detail(
 
 
 # ============================================================
-# DISCLAIMER
+# 8. DISCLAIMER
 # ============================================================
 
 def build_disclaimer():
 
     return [
-        "━━━━━━━━━━━━━━━━━━━━━━",
         "⚠️ DATA DISCLAIMER",
         "━━━━━━━━━━━━━━━━━━━━━━",
         "",
-        "무료 데이터 기반 분석입니다.",
+        "본 시스템은 무료 데이터 기반",
+        "옵션 분석 시스템입니다.",
         "",
         "🟢 REAL",
-        "실제 제공 데이터",
+        "무료 데이터에서 직접 제공된 값",
         "",
         "🔵 CALCULATED",
-        "시장 데이터로 자체 계산",
+        "무료 데이터로 자체 계산한 값",
         "",
         "🟡 ESTIMATED",
-        "BUY / SELL / OPEN / CLOSE 등",
-        "무료 데이터 기반 간접 추정",
+        "무료 데이터로 직접 확인할 수 없어",
+        "간접적으로 추정한 값",
         "",
         "⚪ UNAVAILABLE",
-        "무료 데이터에서 확인 불가",
+        "무료 데이터에서 확인할 수 없는 값",
         "",
-        "실제 옵션 체결 방향 및",
-        "기관 포지션을 확정적으로",
-        "의미하지 않습니다.",
+        "특히 BUY / SELL 및",
+        "OPEN / CLOSE는 추정값이며",
+        "실제 체결 방향을 의미하지 않습니다.",
+        "",
+        "실제 기관 포지션을",
+        "확정적으로 의미하지 않습니다.",
     ]
 
 
 # ============================================================
-# SCAN COMPLETE
+# 9. SCAN COMPLETE
 # ============================================================
 
 def build_complete(
@@ -2103,16 +1881,12 @@ def build_complete(
             avoids += 1
 
     return [
-        "━━━━━━━━━━━━━━━━━━━━━━",
         "🏁 SCAN COMPLETE",
         "━━━━━━━━━━━━━━━━━━━━━━",
         "",
         "Market Regime",
-        (
-            "CHECKED"
-            if market_rows
-            else UNAVAILABLE()
-        ),
+        "🟢 CHECKED" if market_rows
+        else "⚪ UNAVAILABLE",
         "",
         "TOP20",
         f"{min(20, len(final_rows))} 종목",
@@ -2136,13 +1910,13 @@ def build_complete(
 
 
 # ============================================================
-# BUILD FINAL REPORT
+# BUILD REPORT
 # ============================================================
 
 def build_report():
 
     log(
-        "STEP 12 REPORT BUILD START"
+        "LOADING ANALYSIS CSV"
     )
 
     market_rows = read_csv(
@@ -2184,69 +1958,70 @@ def build_report():
     report = []
 
     # ========================================================
-    # 1. FINAL TRADING LIST
+    # FINAL ORDER
     # ========================================================
 
+    # 1
     report.extend(
         build_final_list(
             final_rows
         )
     )
 
-    # ========================================================
-    # 2. CALL BUY + PUT SELL
-    # ========================================================
+    report.append("")
+    report.append("━━━━━━━━━━━━━━━━━━━━━━")
 
+    # 2
     report.extend(
         build_special(
             special_rows
         )
     )
 
-    # ========================================================
-    # 3. MARKET REGIME
-    # ========================================================
+    report.append("")
+    report.append("━━━━━━━━━━━━━━━━━━━━━━")
 
+    # 3
     report.extend(
         build_market_regime(
             market_rows
         )
     )
 
-    # ========================================================
-    # 4. MARKET REGIME SCORE
-    # ========================================================
+    report.append("")
+    report.append("━━━━━━━━━━━━━━━━━━━━━━")
 
+    # 4
     report.extend(
         build_market_score(
             market_rows
         )
     )
 
-    # ========================================================
-    # 5. UNUSUAL OPTION FLOW
-    # ========================================================
+    report.append("")
+    report.append("━━━━━━━━━━━━━━━━━━━━━━")
 
+    # 5
     report.extend(
         build_unusual_flow(
             unusual_rows
         )
     )
 
-    # ========================================================
-    # 6. TOP 20 OPTION SEARCH
-    # ========================================================
+    report.append("")
+    report.append("━━━━━━━━━━━━━━━━━━━━━━")
 
+    # 6
     report.extend(
         build_top20(
             top20_rows
         )
     )
 
-    # ========================================================
-    # 7. TOP STOCK DETAIL
-    # ========================================================
+    report.append("")
+    report.append("━━━━━━━━━━━━━━━━━━━━━━")
 
+    # 7
     report.extend(
         build_top_detail(
             top20_rows,
@@ -2257,18 +2032,18 @@ def build_report():
         )
     )
 
-    # ========================================================
-    # 8. DATA DISCLAIMER
-    # ========================================================
+    report.append("")
+    report.append("━━━━━━━━━━━━━━━━━━━━━━")
 
+    # 8
     report.extend(
         build_disclaimer()
     )
 
-    # ========================================================
-    # 9. SCAN COMPLETE
-    # ========================================================
+    report.append("")
+    report.append("━━━━━━━━━━━━━━━━━━━━━━")
 
+    # 9
     report.extend(
         build_complete(
             final_rows,
@@ -2277,18 +2052,11 @@ def build_report():
         )
     )
 
-    final_report = "\n".join(report)
-
-    log(
-        "STEP 12 REPORT BUILD COMPLETE | "
-        f"CHARACTERS={len(final_report):,}"
-    )
-
-    return final_report
+    return "\n".join(report)
 
 
 # ============================================================
-# SPLIT TELEGRAM MESSAGE
+# SPLIT MESSAGE
 # ============================================================
 
 def split_message(
@@ -2309,6 +2077,7 @@ def split_message(
     )
 
     messages = []
+
     current = ""
 
     for section in sections:
@@ -2325,47 +2094,43 @@ def split_message(
         )
 
         if (
-            len(current)
+            current
+            and len(current)
             + len(section)
             + 2
-            <= limit
+            > limit
         ):
 
+            messages.append(
+                current
+            )
+
+            current = ""
+
+        if len(section) <= limit:
+
             if current:
+
                 current += "\n\n"
 
             current += section
 
         else:
 
-            if current:
+            start = 0
+
+            while start < len(section):
+
+                chunk = section[
+                    start:
+                    start + limit
+                ]
 
                 messages.append(
-                    current
+                    chunk
                 )
 
-            if len(section) <= limit:
-
-                current = section
-
-            else:
-
-                start = 0
-
-                while start < len(section):
-
-                    chunk = section[
-                        start:
-                        start + limit
-                    ]
-
-                    messages.append(
-                        chunk
-                    )
-
-                    start += limit
-
-                current = ""
+                start += limit
 
     if current:
 
@@ -2377,53 +2142,107 @@ def split_message(
 
 
 # ============================================================
-# SEND FINAL REPORT
+# TELEGRAM API
 # ============================================================
 
-def send_report():
+def telegram_request(
+    method,
+    payload
+):
 
-    if not TOKEN:
+    if not TELEGRAM_BOT_TOKEN:
 
         raise RuntimeError(
             "TELEGRAM_BOT_TOKEN 없음"
         )
 
-    if not CHAT_ID:
+    if not TELEGRAM_CHAT_ID:
 
         raise RuntimeError(
             "TELEGRAM_CHAT_ID 없음"
         )
 
-    log(
-        "TELEGRAM BOT CHECK"
+    url = (
+        "https://api.telegram.org/bot"
+        + TELEGRAM_BOT_TOKEN
+        + "/"
+        + method
     )
 
-    me = api(
-        "getMe"
+    data = json.dumps(
+        payload,
+        ensure_ascii=False
+    ).encode(
+        "utf-8"
     )
 
-    bot = me.get(
-        "result",
-        {}
+    request = urllib.request.Request(
+        url,
+        data=data,
+        headers={
+            "Content-Type":
+                "application/json"
+        },
+        method="POST"
     )
 
-    log(
-        "BOT OK | "
-        + bot.get(
-            "username",
-            "UNKNOWN"
+    try:
+
+        with urllib.request.urlopen(
+            request,
+            timeout=30
+        ) as response:
+
+            body = response.read().decode(
+                "utf-8"
+            )
+
+        result = json.loads(
+            body
         )
-    )
 
-    report = build_report()
+        if not result.get("ok"):
+
+            raise RuntimeError(
+                "Telegram API ERROR : "
+                + str(result)
+            )
+
+        return result
+
+    except urllib.error.HTTPError as exc:
+
+        body = ""
+
+        try:
+            body = exc.read().decode(
+                "utf-8"
+            )
+        except Exception:
+            pass
+
+        raise RuntimeError(
+            "Telegram HTTP ERROR "
+            + str(exc.code)
+            + " : "
+            + body
+        )
+
+
+# ============================================================
+# SEND TELEGRAM
+# ============================================================
+
+def send_telegram(report):
 
     messages = split_message(
         report
     )
 
+    total = len(messages)
+
     log(
-        f"REPORT SPLIT | "
-        f"{len(messages)} messages"
+        f"TELEGRAM MESSAGE COUNT : {total}"
     )
 
     for index, message in enumerate(
@@ -2431,189 +2250,84 @@ def send_report():
         start=1
     ):
 
-        if len(messages) > 1:
+        prefix = ""
+
+        if total > 1:
 
             prefix = (
-                f"📨 MESSAGE "
-                f"{index}/{len(messages)}\n\n"
+                f"📨 {index}/{total}\n\n"
             )
 
-        else:
+        payload = {
+            "chat_id":
+                TELEGRAM_CHAT_ID,
 
-            prefix = ""
+            "text":
+                prefix + message
+        }
 
-        send_message(
-            CHAT_ID,
-            prefix + message
+        result = telegram_request(
+            "sendMessage",
+            payload
         )
 
-        time.sleep(1)
+        message_id = (
+            result
+            .get("result", {})
+            .get("message_id")
+        )
+
+        log(
+            f"TELEGRAM SENT "
+            f"{index}/{total} "
+            f"| message_id={message_id}"
+        )
+
+
+# ============================================================
+# VALIDATION
+# ============================================================
+
+def validate_report(report):
+
+    if not report.strip():
+
+        raise RuntimeError(
+            "REPORT EMPTY"
+        )
+
+    required = [
+        "FINAL TRADING LIST",
+        "CALL BUY + PUT SELL",
+        "MARKET REGIME",
+        "MARKET REGIME SCORE",
+        "UNUSUAL OPTION FLOW",
+        "TOP 20 OPTION SEARCH",
+        "TOP 종목 상세 분석",
+        "DATA DISCLAIMER",
+        "SCAN COMPLETE",
+    ]
+
+    missing = []
+
+    for section in required:
+
+        if section not in report:
+
+            missing.append(
+                section
+            )
+
+    if missing:
+
+        raise RuntimeError(
+            "REPORT SECTION MISSING : "
+            + str(missing)
+        )
 
     log(
-        "FINAL REPORT DELIVERY COMPLETE"
+        "REPORT VALIDATION : OK"
     )
-
-
-# ============================================================
-# COMMAND BOT
-# ============================================================
-
-def run_command_bot():
-
-    print(
-        "Telegram Command Bot V2 시작",
-        flush=True
-    )
-
-    offset = None
-
-    while True:
-
-        try:
-
-            data = {
-                "timeout": 30
-            }
-
-            if offset is not None:
-
-                data["offset"] = offset
-
-            result = api(
-                "getUpdates",
-                data
-            )
-
-            updates = result.get(
-                "result",
-                []
-            )
-
-            for update in updates:
-
-                offset = (
-                    update["update_id"]
-                    + 1
-                )
-
-                message = update.get(
-                    "message",
-                    {}
-                )
-
-                chat = message.get(
-                    "chat",
-                    {}
-                )
-
-                chat_id = chat.get(
-                    "id"
-                )
-
-                text = message.get(
-                    "text",
-                    ""
-                ).strip()
-
-                if not chat_id or not text:
-                    continue
-
-                if (
-                    CHAT_ID
-                    and str(chat_id)
-                    != str(CHAT_ID)
-                ):
-
-                    continue
-
-                if text == "/start":
-
-                    send_message(
-                        chat_id,
-                        "🔥 OPTION FLOW SCANNER V2\n\n"
-                        "사용법:\n"
-                        "/scan AAPL\n"
-                        "/scan NVDA\n"
-                        "/scan SOXL"
-                    )
-
-                    continue
-
-                if text.startswith(
-                    "/scan "
-                ):
-
-                    ticker = (
-                        text.split(
-                            " ",
-                            1
-                        )[1]
-                        .upper()
-                        .strip()
-                    )
-
-                    send_message(
-                        chat_id,
-                        f"🔎 {ticker} 분석 시작"
-                    )
-
-                    try:
-
-                        process = subprocess.run(
-                            [
-                                sys.executable,
-                                OPTION_SEARCH_SCRIPT,
-                                ticker
-                            ],
-                            capture_output=True,
-                            text=True,
-                            timeout=120
-                        )
-
-                        output = (
-                            process.stdout
-                            or process.stderr
-                        )
-
-                        if not output:
-
-                            output = (
-                                "⚪ 분석 결과 없음"
-                            )
-
-                        if len(output) > 3500:
-
-                            output = output[
-                                -3500:
-                            ]
-
-                        send_message(
-                            chat_id,
-                            output
-                        )
-
-                    except Exception as exc:
-
-                        send_message(
-                            chat_id,
-                            f"❌ 오류: {exc}"
-                        )
-
-                else:
-
-                    send_message(
-                        chat_id,
-                        "사용법: /scan AAPL"
-                    )
-
-        except Exception as exc:
-
-            print(
-                f"Bot error: {exc}",
-                flush=True
-            )
-
-            time.sleep(5)
 
 
 # ============================================================
@@ -2622,74 +2336,100 @@ def run_command_bot():
 
 def main():
 
-    if not TOKEN:
-
-        print(
-            "TELEGRAM_BOT_TOKEN 없음",
-            flush=True
-        )
-
-        return
-
     print(
-        "🔥 OPTION FLOW SCANNER TELEGRAM V2",
-        flush=True
+        "🔥 OPTION FLOW SCANNER"
     )
 
     print(
-        "TOKEN : OK",
-        flush=True
+        "STEP 12 TELEGRAM REPORTER"
     )
 
     print(
-        "CHAT_ID : "
-        + (
-            "OK"
-            if CHAT_ID
-            else "MISSING"
-        ),
-        flush=True
+        "=========================================="
     )
 
-    # --------------------------------------------------------
-    # STEP 12 REPORT MODE
-    # --------------------------------------------------------
-    #
-    # GitHub Actions에서
-    # TELEGRAM_REPORT=1 이면
-    # 최종 리포트를 한번 보내고 종료.
-    #
-    # --------------------------------------------------------
-
-    report_mode = os.environ.get(
-        "TELEGRAM_REPORT",
-        ""
-    ).lower()
-
-    if report_mode in (
-        "1",
-        "true",
-        "yes",
-        "report"
+    if not os.path.isdir(
+        DATA_DIR
     ):
 
-        log(
-            "MODE : FINAL REPORT"
+        raise RuntimeError(
+            "DATA DIRECTORY NOT FOUND : "
+            + DATA_DIR
         )
 
-        send_report()
+    if not TELEGRAM_BOT_TOKEN:
 
-        log(
-            "STEP 12 TELEGRAM COMPLETE"
+        raise RuntimeError(
+            "TELEGRAM_BOT_TOKEN 없음"
         )
 
-        return
+    if not TELEGRAM_CHAT_ID:
+
+        raise RuntimeError(
+            "TELEGRAM_CHAT_ID 없음"
+        )
+
+    print(
+        "TOKEN : OK"
+    )
+
+    print(
+        "CHAT_ID : OK"
+    )
 
     # --------------------------------------------------------
-    # COMMAND BOT MODE
+    # BUILD
     # --------------------------------------------------------
 
-    run_command_bot()
+    report = build_report()
+
+    validate_report(
+        report
+    )
+
+    # --------------------------------------------------------
+    # PREVIEW
+    # --------------------------------------------------------
+
+    print()
+    print(
+        "=" * 72
+    )
+
+    print(
+        "TELEGRAM REPORT PREVIEW"
+    )
+
+    print(
+        "=" * 72
+    )
+
+    print(report)
+
+    print(
+        "=" * 72
+    )
+
+    # --------------------------------------------------------
+    # SEND
+    # --------------------------------------------------------
+
+    send_telegram(
+        report
+    )
+
+    print()
+    print(
+        "=========================================="
+    )
+
+    print(
+        "🔥 TELEGRAM DELIVERY COMPLETE"
+    )
+
+    print(
+        "=========================================="
+    )
 
 
 # ============================================================
@@ -2699,4 +2439,3 @@ def main():
 if __name__ == "__main__":
 
     main()
-
