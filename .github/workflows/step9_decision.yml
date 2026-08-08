@@ -1,8 +1,8 @@
-
-name: STEP 9 Decision
+name: STEP 9 - Decision
 
 on:
   workflow_dispatch:
+
   push:
     paths:
       - "src/09_decision.py"
@@ -15,8 +15,14 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: step9-decision
+  cancel-in-progress: false
+
 jobs:
+
   decision:
+
     runs-on: ubuntu-latest
 
     steps:
@@ -29,6 +35,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: true
 
       # ============================================================
       # PYTHON
@@ -49,11 +56,12 @@ jobs:
           pip install -r requirements.txt
 
       # ============================================================
-      # STEP 9 INPUT CHECK
+      # INPUT CHECK
       # ============================================================
 
       - name: STEP 9 Input Check
         run: |
+
           echo "=========================================="
           echo "STEP 9 INPUT CHECK"
           echo "=========================================="
@@ -63,15 +71,15 @@ jobs:
           pwd
 
           echo ""
-          echo "REPOSITORY FILES"
+          echo "REPOSITORY"
           ls -la
 
           echo ""
-          echo "SRC DIRECTORY"
+          echo "SRC"
           ls -la src || true
 
           echo ""
-          echo "ANALYSIS DIRECTORY"
+          echo "ANALYSIS"
           ls -la data/analysis || true
 
           echo ""
@@ -79,31 +87,38 @@ jobs:
           echo "REQUIRED FILES"
           echo "=========================================="
 
+          test -f src/09_decision.py
           test -f data/analysis/market_regime.csv
           test -f data/analysis/structure.csv
           test -f data/analysis/unusual_flow.csv
           test -f data/analysis/top20.csv
-          test -f src/09_decision.py
+
+          echo ""
+          echo "REQUIRED FILES : OK"
 
           echo ""
           echo "STEP 1 MARKET REGIME"
           echo "------------------------------------------"
+
           cat data/analysis/market_regime.csv
 
           echo ""
           echo "STEP 8 STRUCTURE"
           echo "------------------------------------------"
-          head -10 data/analysis/structure.csv
+
+          head -15 data/analysis/structure.csv
 
           echo ""
           echo "UNUSUAL FLOW"
           echo "------------------------------------------"
-          head -10 data/analysis/unusual_flow.csv
+
+          head -15 data/analysis/unusual_flow.csv
 
           echo ""
           echo "TOP20"
           echo "------------------------------------------"
-          head -10 data/analysis/top20.csv
+
+          head -15 data/analysis/top20.csv
 
           echo ""
           echo "STEP 9 INPUT CHECK : OK"
@@ -114,6 +129,7 @@ jobs:
 
       - name: Run STEP 9 Decision
         run: |
+
           echo "=========================================="
           echo "STEP 9 DECISION"
           echo "=========================================="
@@ -121,11 +137,12 @@ jobs:
           python src/09_decision.py
 
       # ============================================================
-      # STEP 9 OUTPUT CHECK
+      # OUTPUT CHECK
       # ============================================================
 
       - name: STEP 9 Output Check
         run: |
+
           echo "=========================================="
           echo "STEP 9 OUTPUT CHECK"
           echo "=========================================="
@@ -153,11 +170,13 @@ jobs:
 
       - name: STEP 9 Validation
         run: |
+
           echo "=========================================="
           echo "STEP 9 VALIDATION"
           echo "=========================================="
 
           python - <<'PY'
+
           import pandas as pd
 
           file = "data/analysis/decision.csv"
@@ -165,26 +184,99 @@ jobs:
           df = pd.read_csv(file)
 
           print("ROWS :", len(df))
-          print("COLUMNS :", list(df.columns))
+
+          print(
+              "COLUMNS :",
+              list(df.columns)
+          )
 
           required = [
               "ticker",
+              "market_score",
+              "flow_score",
               "decision_score",
               "decision"
           ]
 
           for column in required:
+
               if column not in df.columns:
+
                   raise RuntimeError(
                       f"Required column missing: {column}"
                   )
+
+          # ------------------------------------------------------
+          # ROW CHECK
+          # ------------------------------------------------------
+
+          if len(df) == 0:
+
+              raise RuntimeError(
+                  "decision.csv contains zero rows"
+              )
+
+          # ------------------------------------------------------
+          # SCORE CHECK
+          # ------------------------------------------------------
+
+          if df["decision_score"].isna().any():
+
+              raise RuntimeError(
+                  "decision_score contains NaN"
+              )
+
+          invalid_scores = df[
+              (df["decision_score"] < 0)
+              |
+              (df["decision_score"] > 100)
+          ]
+
+          if not invalid_scores.empty:
+
+              raise RuntimeError(
+                  "decision_score outside 0-100 range"
+              )
+
+          # ------------------------------------------------------
+          # DECISION CHECK
+          # ------------------------------------------------------
+
+          valid_decisions = {
+              "🟢 진입",
+              "🟡 관망",
+              "🔴 회피"
+          }
+
+          invalid_decisions = set(
+              df["decision"].dropna()
+          ) - valid_decisions
+
+          if invalid_decisions:
+
+              raise RuntimeError(
+                  "Invalid decision values: "
+                  + str(invalid_decisions)
+              )
+
+          # ------------------------------------------------------
+          # SUMMARY
+          # ------------------------------------------------------
 
           print("")
           print("DECISION SUMMARY")
           print("------------------------------------------")
 
-          if "decision" in df.columns:
-              print(df["decision"].value_counts(dropna=False))
+          print(
+              df["decision"]
+              .value_counts(
+                  dropna=False
+              )
+          )
+
+          # ------------------------------------------------------
+          # TOP DECISIONS
+          # ------------------------------------------------------
 
           print("")
           print("TOP DECISIONS")
@@ -194,10 +286,13 @@ jobs:
               column
               for column in [
                   "final_rank",
-                  "rank",
                   "ticker",
                   "market_score",
                   "flow_score",
+                  "gex_component",
+                  "structure_component",
+                  "price_component",
+                  "index_component",
                   "decision_score",
                   "decision"
               ]
@@ -205,13 +300,43 @@ jobs:
           ]
 
           print(
-              df[columns]
+              df[
+                  columns
+              ]
               .head(20)
-              .to_string(index=False)
+              .to_string(
+                  index=False
+              )
+          )
+
+          # ------------------------------------------------------
+          # DUPLICATE CHECK
+          # ------------------------------------------------------
+
+          duplicate_tickers = (
+              df[
+                  "ticker"
+              ]
+              .duplicated()
+              .sum()
+          )
+
+          if duplicate_tickers > 0:
+
+              raise RuntimeError(
+                  "Duplicate ticker detected"
+              )
+
+          print("")
+          print(
+              "DUPLICATE TICKERS : OK"
           )
 
           print("")
-          print("STEP 9 VALIDATION : OK")
+          print(
+              "STEP 9 VALIDATION : OK"
+          )
+
           PY
 
       # ============================================================
@@ -220,6 +345,7 @@ jobs:
 
       - name: Save STEP 9 result to GitHub
         run: |
+
           echo "=========================================="
           echo "SAVE STEP 9 RESULT"
           echo "=========================================="
@@ -227,14 +353,77 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+          # ------------------------------------------------------
+          # GET LATEST REMOTE
+          # ------------------------------------------------------
+
+          git fetch origin main
+
+          # ------------------------------------------------------
+          # REBASE ON LATEST MAIN
+          # ------------------------------------------------------
+
+          git rebase origin/main
+
+          # ------------------------------------------------------
+          # ADD RESULT
+          # ------------------------------------------------------
+
           git add data/analysis/decision.csv
 
+          # ------------------------------------------------------
+          # COMMIT
+          # ------------------------------------------------------
+
           if git diff --cached --quiet; then
+
             echo "No changes to commit."
+
           else
-            git commit -m "Fix STEP 9 decision workflow path"
-            git push
+
+            git commit \
+              -m "Add STEP 9 market stock decision"
+
           fi
+
+          # ------------------------------------------------------
+          # PUSH WITH RETRY
+          # ------------------------------------------------------
+
+          for attempt in 1 2 3
+          do
+
+            echo ""
+            echo "PUSH ATTEMPT : ${attempt}"
+
+            if git push origin HEAD:main; then
+
+              echo ""
+              echo "PUSH SUCCESS"
+              break
+
+            fi
+
+            if [ "${attempt}" -eq 3 ]; then
+
+              echo ""
+              echo "PUSH FAILED AFTER 3 ATTEMPTS"
+              exit 1
+
+            fi
+
+            echo ""
+            echo "REMOTE CHANGED"
+            echo "FETCHING LATEST MAIN"
+
+            git fetch origin main
+
+            echo ""
+            echo "REBASING"
+
+            git rebase origin/main
+
+          done
 
       # ============================================================
       # COMPLETE
@@ -242,6 +431,7 @@ jobs:
 
       - name: STEP 9 Complete
         run: |
+
           echo "=========================================="
           echo "🔥 STEP 9 DECISION COMPLETE"
           echo "=========================================="
@@ -249,6 +439,19 @@ jobs:
           echo ""
           echo "decision.csv saved to:"
           echo "data/analysis/decision.csv"
+
+          echo ""
+          echo "DECISION ENGINE:"
+          echo "Market       : 25%"
+          echo "Flow         : 30%"
+          echo "Structure    : 20%"
+          echo "Price / Wall : 15%"
+          echo "Index        : 10%"
+
+          echo ""
+          echo "ENTRY        : >= 75"
+          echo "WATCH        : 55 - 74.99"
+          echo "AVOID        : < 55"
 
           echo ""
           echo "STEP 9 STATUS : SUCCESS"
