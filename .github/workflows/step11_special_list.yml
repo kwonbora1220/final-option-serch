@@ -10,18 +10,37 @@ jobs:
 
     steps:
 
+      # ============================================================
+      # CHECKOUT
+      # ============================================================
+
       - name: Checkout repository
         uses: actions/checkout@v4
+
+
+      # ============================================================
+      # PYTHON
+      # ============================================================
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
+
+      # ============================================================
+      # DEPENDENCIES
+      # ============================================================
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+
+
+      # ============================================================
+      # INPUT CHECK
+      # ============================================================
 
       - name: STEP 11 Input Check
         run: |
@@ -30,19 +49,16 @@ jobs:
           echo "STEP 11 INPUT CHECK"
           echo "=========================================="
 
-          test -f data/analysis/unusual_flow.csv
-          test -f data/analysis/decision.csv
+          test -f data/analysis/options_greeks.csv
 
-          test -f src/11_special_list.py
+          echo "OPTIONS GREEKS : OK"
 
-          echo "UNUSUAL FLOW : OK"
-          echo "DECISION     : OK"
-          echo "PROGRAM      : OK"
+          ls -lh data/analysis/options_greeks.csv
 
-          ls -lh \
-            data/analysis/unusual_flow.csv \
-            data/analysis/decision.csv \
-            src/11_special_list.py
+
+      # ============================================================
+      # RUN STEP 11
+      # ============================================================
 
       - name: Run STEP 11 Special List
         run: |
@@ -52,6 +68,11 @@ jobs:
           echo "=========================================="
 
           python src/11_special_list.py
+
+
+      # ============================================================
+      # OUTPUT CHECK
+      # ============================================================
 
       - name: STEP 11 Output Check
         run: |
@@ -73,66 +94,78 @@ jobs:
           echo "MARKDOWN:"
           ls -lh data/analysis/special_list.md
 
+
           python - <<'PY'
           import pandas as pd
 
-          file = "data/analysis/special_list.csv"
+          csv_file = "data/analysis/special_list.csv"
 
-          df = pd.read_csv(file)
+          df = pd.read_csv(csv_file)
 
           print()
-          print("ROWS                  :", len(df))
-
-          if len(df) > 0:
-
-              print(
-                  "TICKERS               :",
-                  df["ticker"].nunique()
+          print("ROWS              :", len(df))
+          print("TICKERS           :", df["ticker"].nunique())
+          print(
+              "SPECIAL SCORE     :",
+              df["special_score"].notna().sum()
+          )
+          print(
+              "STRUCTURE VALID   :",
+              (
+                  df["structure"]
+                  .astype(str)
+                  .str.contains(
+                      "CALL BUY + PUT SELL",
+                      regex=False
+                  )
+                  .sum()
               )
+          )
 
+          print()
+
+          if len(df) == 0:
               print(
-                  "CALL BUY VALID        :",
-                  (df["call_buy_count"] > 0).sum()
+                  "SPECIAL LIST      : 0"
               )
-
               print(
-                  "PUT SELL VALID        :",
-                  (df["put_sell_count"] > 0).sum()
+                  "NO CALL BUY + PUT SELL STRUCTURE"
               )
-
-              print(
-                  "STRUCTURE VALID       :",
-                  (
-                      df["structure"]
-                      == "CALL BUY + PUT SELL"
-                  ).sum()
-              )
-
-              print()
-              print("SPECIAL LIST")
-              print("----------------------------------------")
-
-              print(
-                  df[
-                      [
-                          "special_rank",
-                          "ticker",
-                          "call_buy_count",
-                          "put_sell_count",
-                          "call_buy_volume",
-                          "put_sell_volume",
-                          "decision"
-                      ]
-                  ].to_string(index=False)
-              )
-
           else:
 
-              print("NO CALL BUY + PUT SELL STRUCTURE FOUND")
+              print(
+                  "SPECIAL LIST PREVIEW"
+              )
+
+              print(
+                  "----------------------------------------"
+              )
+
+              columns = [
+                  "special_rank",
+                  "ticker",
+                  "special_score",
+                  "current_price",
+                  "call_strike",
+                  "put_strike",
+                  "call_dte",
+                  "put_dte",
+                  "structure",
+              ]
+
+              print(
+                  df[columns]
+                  .to_string(index=False)
+              )
 
           print()
           print("STEP 11 OUTPUT : OK")
           PY
+
+
+      # ============================================================
+      # SAVE
+      # ============================================================
 
       - name: Save STEP 11 result to GitHub
         run: |
@@ -167,6 +200,11 @@ jobs:
 
           fi
 
+
+      # ============================================================
+      # COMPLETE
+      # ============================================================
+
       - name: STEP 11 Complete
         run: |
 
@@ -174,6 +212,7 @@ jobs:
           echo "🔥 STEP 11 SPECIAL LIST COMPLETE"
           echo "=========================================="
 
+          echo ""
           echo "CSV:"
           echo "data/analysis/special_list.csv"
 
@@ -182,8 +221,9 @@ jobs:
           echo "data/analysis/special_list.md"
 
           echo ""
-          echo "STRUCTURE:"
+          echo "SPECIAL STRUCTURE:"
           echo "CALL BUY + PUT SELL"
 
           echo ""
           echo "STEP 11 STATUS : SUCCESS"
+
