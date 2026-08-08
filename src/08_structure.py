@@ -1,4 +1,4 @@
-```python
+
 import os
 import math
 from datetime import datetime, timezone
@@ -653,4 +653,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-```
