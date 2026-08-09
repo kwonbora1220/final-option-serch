@@ -1,10 +1,11 @@
+
 name: STEP 5 - Unusual Option Flow
 
 on:
   workflow_dispatch:
 
 concurrency:
-  group: option-scanner-main-writer
+  group: option-scanner-step5
   cancel-in-progress: false
 
 jobs:
@@ -13,95 +14,209 @@ jobs:
 
     steps:
 
-      # ========================================================
-      # CHECKOUT
-      # ========================================================
+      # ============================================================
+      # 1. CHECKOUT
+      # ============================================================
 
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      # ========================================================
-      # PYTHON
-      # ========================================================
+      # ============================================================
+      # 2. PYTHON
+      # ============================================================
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      # ========================================================
-      # DEPENDENCIES
-      # ========================================================
+      # ============================================================
+      # 3. DEPENDENCIES
+      # ============================================================
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # ========================================================
-      # STEP 4 INPUT CHECK
-      # ========================================================
+      # ============================================================
+      # 4. CHECK CURRENT NORMALIZED DATA
+      #
+      # IMPORTANT:
+      # Never use the old 27,961-row options_greeks.csv
+      # stored in the repository.
+      # ============================================================
 
-      - name: Check Greeks Data
+      - name: Check Normalized Data
         run: |
+
           echo "=========================================="
-          echo "STEP 4 INPUT CHECK"
+          echo "STEP 3 INPUT CHECK"
           echo "=========================================="
 
-          if [ ! -f data/analysis/options_greeks.csv ]; then
-            echo "ERROR: options_greeks.csv not found"
-            exit 1
-          fi
+          test -f data/normalized/options_normalized.csv
 
-          ls -lh data/analysis/options_greeks.csv
+          python - <<'PY'
+          import pandas as pd
 
-          python -c "import pandas as pd; df=pd.read_csv('data/analysis/options_greeks.csv'); print('ROWS       :', len(df)); print('COLUMNS    :', len(df.columns)); print('TICKERS    :', df['symbol'].nunique()); print('DTE MIN    :', df['DTE'].min()); print('DTE MAX    :', df['DTE'].max()); print('VALID DELTA:', df['delta'].notna().sum()); print('VALID GAMMA:', df['gamma'].notna().sum()); print('VALID VEGA :', df['vega'].notna().sum())"
+          file = "data/normalized/options_normalized.csv"
 
-      # ========================================================
-      # STEP 5
-      # ========================================================
+          df = pd.read_csv(file)
+
+          print("ROWS       :", len(df))
+          print("COLUMNS    :", len(df.columns))
+          print("TICKERS    :", df["symbol"].nunique())
+          print("DTE MIN    :", df["DTE"].min())
+          print("DTE MAX    :", df["DTE"].max())
+
+          if len(df) < 100000:
+              raise RuntimeError(
+                  f"Normalized dataset is too small: {len(df)}"
+              )
+
+          if df["symbol"].nunique() < 500:
+              raise RuntimeError(
+                  f"Option universe is too small: "
+                  f"{df['symbol'].nunique()}"
+              )
+
+          print("NORMALIZED DATA : OK")
+          PY
+
+      # ============================================================
+      # 5. REBUILD GREEKS FROM CURRENT NORMALIZED DATA
+      #
+      # IMPORTANT:
+      # This intentionally does NOT read
+      # data/analysis/options_greeks.csv
+      #
+      # It guarantees STEP 5 uses the current 548-ticker universe.
+      # ============================================================
+
+      - name: Rebuild Current Greeks
+        run: |
+
+          echo "=========================================="
+          echo "REBUILD CURRENT STEP 4 GREEKS"
+          echo "=========================================="
+
+          rm -f data/analysis/options_greeks.csv
+
+          python src/04_greeks.py
+
+      # ============================================================
+      # 6. VERIFY CURRENT GREEKS
+      # ============================================================
+
+      - name: Verify Current Greeks
+        run: |
+
+          echo "=========================================="
+          echo "CURRENT GREEKS CHECK"
+          echo "=========================================="
+
+          test -f data/analysis/options_greeks.csv
+
+          python - <<'PY'
+          import pandas as pd
+
+          file = "data/analysis/options_greeks.csv"
+
+          df = pd.read_csv(file)
+
+          print("ROWS       :", len(df))
+          print("COLUMNS    :", len(df.columns))
+          print("TICKERS    :", df["symbol"].nunique())
+          print("DTE MIN    :", df["DTE"].min())
+          print("DTE MAX    :", df["DTE"].max())
+          print("VALID DELTA:", df["delta"].notna().sum())
+          print("VALID GAMMA:", df["gamma"].notna().sum())
+          print("VALID VEGA :", df["vega"].notna().sum())
+
+          if len(df) < 100000:
+              raise RuntimeError(
+                  f"Greeks dataset is too small: {len(df)}"
+              )
+
+          if df["symbol"].nunique() < 500:
+              raise RuntimeError(
+                  f"Greeks ticker count is too small: "
+                  f"{df['symbol'].nunique()}"
+              )
+
+          print("CURRENT GREEKS : OK")
+          PY
+
+      # ============================================================
+      # 7. RUN STEP 5
+      # ============================================================
 
       - name: Run Unusual Flow Engine
         run: |
+
           echo "=========================================="
           echo "RUN STEP 5 UNUSUAL FLOW"
           echo "=========================================="
 
           python src/05_unusual_flow.py
 
-      # ========================================================
-      # STEP 5 OUTPUT CHECK
-      # ========================================================
+      # ============================================================
+      # 8. VALIDATE STEP 5
+      # ============================================================
 
       - name: Check Unusual Flow Output
         run: |
+
           echo "=========================================="
           echo "STEP 5 OUTPUT CHECK"
           echo "=========================================="
 
-          if [ ! -f data/analysis/unusual_flow.csv ]; then
-            echo "ERROR: unusual_flow.csv was not created"
-            exit 1
-          fi
+          test -f data/analysis/unusual_flow.csv
 
-          ls -lh data/analysis/unusual_flow.csv
+          python - <<'PY'
+          import pandas as pd
 
-          python -c "import pandas as pd; df=pd.read_csv('data/analysis/unusual_flow.csv'); print('ROWS       :', len(df)); print('COLUMNS    :', len(df.columns)); print('TICKERS    :', df['symbol'].nunique()); print('FLOW SCORE :', df['flow_score'].notna().sum()); print('BUY EST.   :', (df['trade_side_estimate']=='BUY EST.').sum()); print('SELL EST.  :', (df['trade_side_estimate']=='SELL EST.').sum())"
+          file = "data/analysis/unusual_flow.csv"
 
-      # ========================================================
-      # SAVE STEP 5 ONLY
+          df = pd.read_csv(file)
+
+          print("ROWS        :", len(df))
+          print("COLUMNS     :", len(df.columns))
+          print("TICKERS     :", df["symbol"].nunique())
+          print("FLOW SCORE  :", df["flow_score"].notna().sum())
+          print(
+              "BUY EST.    :",
+              (df["trade_side_estimate"] == "BUY EST.").sum()
+          )
+          print(
+              "SELL EST.   :",
+              (df["trade_side_estimate"] == "SELL EST.").sum()
+          )
+
+          if len(df) < 100000:
+              raise RuntimeError(
+                  f"Unusual flow row count too small: {len(df)}"
+              )
+
+          if df["symbol"].nunique() < 500:
+              raise RuntimeError(
+                  f"Unusual flow ticker count too small: "
+                  f"{df['symbol'].nunique()}"
+              )
+
+          print("STEP 5 OUTPUT : OK")
+          PY
+
+      # ============================================================
+      # 9. SAVE STEP 5 OUTPUT
       #
-      # IMPORTANT:
-      # options_greeks.csv is intentionally NOT committed.
-      # It is too large for GitHub's 100 MB file limit.
-      #
-      # Only unusual_flow.csv is committed.
-      # ========================================================
+      # unusual_flow.csv is much smaller than Greeks,
+      # so it may be committed safely.
+      # ============================================================
 
-      - name: Save Unusual Flow Data To Repository
+      - name: Save Unusual Flow Data
         run: |
+
           set -e
 
           echo "=========================================="
@@ -111,44 +226,33 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # ----------------------------------------------------
-          # IMPORTANT
-          #
-          # STEP 4 creates options_greeks.csv locally.
-          # It must never be committed to GitHub.
-          #
-          # Remove it from the working tree before committing
-          # STEP 5 output.
-          # ----------------------------------------------------
-
-          rm -f data/analysis/options_greeks.csv
-
-          # ----------------------------------------------------
-          # Stage ONLY STEP 5 output
-          # ----------------------------------------------------
-
           git add data/analysis/unusual_flow.csv
-
-          echo "=========================================="
-          echo "CHECK STAGED FILES"
-          echo "=========================================="
-
-          git diff --cached --name-only
-
-          # ----------------------------------------------------
-          # Nothing changed
-          # ----------------------------------------------------
 
           if git diff --cached --quiet; then
             echo "NO CHANGES TO COMMIT"
             exit 0
           fi
 
-          # ----------------------------------------------------
-          # Commit
-          # ----------------------------------------------------
+          git commit -m "Update unusual option flow analysis"
 
-          git commit -m "Add unusual option flow analysis"
+          echo "STEP 5 COMMIT CREATED"
+
+      # ============================================================
+      # 10. PUSH
+      # ============================================================
+
+      - name: Push Step 5 Data
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "SYNC WITH REMOTE MAIN"
+          echo "=========================================="
+
+          git fetch origin main
+
+          git rebase origin/main
 
           echo "=========================================="
           echo "PUSH STEP 5 DATA"
@@ -156,29 +260,29 @@ jobs:
 
           git push origin HEAD:main
 
-          echo "=========================================="
-          echo "STEP 5 GIT SAVE COMPLETE"
-          echo "=========================================="
-
-      # ========================================================
-      # ARTIFACT
-      # ========================================================
+      # ============================================================
+      # 11. ARTIFACT - ARCHIVE ONLY
+      # ============================================================
 
       - name: Upload Unusual Flow Data
         uses: actions/upload-artifact@v4
         with:
-          name: unusual-flow-data
+          name: step5-unusual-flow-output
           path: data/analysis/unusual_flow.csv
+          retention-days: 1
 
-      # ========================================================
-      # FINAL
-      # ========================================================
+      # ============================================================
+      # 12. FINAL
+      # ============================================================
 
-      - name: STEP 5 Final Check
+      - name: STEP 5 Complete
         run: |
+
           echo "=========================================="
           echo "STEP 5 COMPLETE"
           echo "=========================================="
-          echo "Unusual Option Flow analysis completed successfully."
-          echo "Output : data/analysis/unusual_flow.csv"
-          echo "=========================================="
+
+          echo "Current option universe processed."
+          echo "Expected ticker count : 548"
+          echo "Expected rows         : ~291,997"
+          echo "Old 27,961-row Greeks file was NOT used."
