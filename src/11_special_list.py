@@ -1,38 +1,9 @@
-
 import os
 from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
 
-
-# ============================================================
-# STEP 11 - SPECIAL LIST
-#
-# CALL BUY + PUT SELL
-#
-# BULLISH STRUCTURE REQUIREMENTS
-#
-# 1. CALL side = BUY
-# 2. PUT side  = SELL
-# 3. CALL delta > 0
-# 4. PUT delta  < 0
-# 5. CALL strike >= current price
-# 6. PUT strike  <= current price
-# 7. Expiration / DTE reasonably aligned
-#
-# INPUT:
-# data/analysis/unusual_flow.csv
-#
-# OUTPUT:
-# data/analysis/special_list.csv
-# data/analysis/special_list.md
-# ============================================================
-
-
-# ============================================================
-# CONFIG
-# ============================================================
 
 INPUT_FILE = "data/analysis/unusual_flow.csv"
 
@@ -50,11 +21,9 @@ OUTPUT_MD = os.path.join(
 
 MAX_RESULTS = 20
 
-# 같은 구조로 인정할 최대 DTE 차이
 MAX_DTE_DISTANCE = 7
 
-# 같은 구조로 인정할 최대 만기 차이
-MAX_EXPIRATION_DISTANCE = 7
+MIN_RELATIVE_PREMIUM = 0.02
 
 
 # ============================================================
@@ -75,7 +44,7 @@ def log(message):
 
 
 # ============================================================
-# COLUMN HELPERS
+# HELPERS
 # ============================================================
 
 def normalize_column_name(value):
@@ -91,9 +60,9 @@ def normalize_column_name(value):
 
 def find_column(df, candidates):
 
-    normalized = {
-        normalize_column_name(col): col
-        for col in df.columns
+    mapping = {
+        normalize_column_name(c): c
+        for c in df.columns
     }
 
     for candidate in candidates:
@@ -102,9 +71,8 @@ def find_column(df, candidates):
             candidate
         )
 
-        if key in normalized:
-
-            return normalized[key]
+        if key in mapping:
+            return mapping[key]
 
     return None
 
@@ -125,14 +93,9 @@ def numeric_series(df, column):
     )
 
 
-# ============================================================
-# SIDE NORMALIZATION
-# ============================================================
-
 def normalize_side(value):
 
     if pd.isna(value):
-
         return ""
 
     text = (
@@ -141,13 +104,8 @@ def normalize_side(value):
         .strip()
         .replace("-", "_")
         .replace(" ", "_")
+        .rstrip(".")
     )
-
-    text = text.rstrip(".")
-
-    # --------------------------------------------------------
-    # BUY
-    # --------------------------------------------------------
 
     if text in {
         "BUY",
@@ -160,12 +118,7 @@ def normalize_side(value):
         "BTC",
         "BTOC",
     }:
-
         return "BUY"
-
-    # --------------------------------------------------------
-    # SELL
-    # --------------------------------------------------------
 
     if text in {
         "SELL",
@@ -178,26 +131,14 @@ def normalize_side(value):
         "STC",
         "STOC",
     }:
-
         return "SELL"
-
-    # --------------------------------------------------------
-    # UNKNOWN
-    #
-    # NEVER GUESS
-    # --------------------------------------------------------
 
     return ""
 
 
-# ============================================================
-# OPTION TYPE
-# ============================================================
-
 def normalize_option_type(value):
 
     if pd.isna(value):
-
         return ""
 
     text = (
@@ -211,7 +152,6 @@ def normalize_option_type(value):
         "CALL",
         "CALLS",
     }:
-
         return "CALL"
 
     if text in {
@@ -219,20 +159,14 @@ def normalize_option_type(value):
         "PUT",
         "PUTS",
     }:
-
         return "PUT"
 
     return ""
 
 
-# ============================================================
-# EXPIRATION
-# ============================================================
-
 def normalize_expiration(value):
 
     if pd.isna(value):
-
         return pd.NaT
 
     return pd.to_datetime(
@@ -241,35 +175,22 @@ def normalize_expiration(value):
     )
 
 
-# ============================================================
-# SCORE NORMALIZATION
-# ============================================================
-
-def minmax_score(series):
+def minmax(series):
 
     values = pd.to_numeric(
         series,
         errors="coerce",
-    ).fillna(0.0)
+    ).fillna(0)
 
-    if len(values) == 0:
-
+    if values.empty:
         return values
 
-    maximum = values.max()
-    minimum = values.min()
+    low = values.min()
+    high = values.max()
 
-    if not np.isfinite(maximum):
+    if high == low:
 
-        return pd.Series(
-            0.0,
-            index=values.index,
-        )
-
-    if maximum == minimum:
-
-        if maximum > 0:
-
+        if high > 0:
             return pd.Series(
                 100.0,
                 index=values.index,
@@ -281,15 +202,15 @@ def minmax_score(series):
         )
 
     return (
-        (values - minimum)
+        (values - low)
         /
-        (maximum - minimum)
-        * 100.0
+        (high - low)
+        * 100
     )
 
 
 # ============================================================
-# PREPARE INPUT
+# PREPARE
 # ============================================================
 
 def prepare_data(raw):
@@ -313,13 +234,6 @@ def prepare_data(raw):
             "call_put",
         ],
     )
-
-    # STEP 5 우선:
-    #
-    # trade_side_estimate
-    #
-    # 실제 STEP 5 unusual_flow.csv에서
-    # 사용되는 컬럼을 우선적으로 찾는다.
 
     side_col = find_column(
         raw,
@@ -358,23 +272,6 @@ def prepare_data(raw):
         ],
     )
 
-    volume_col = find_column(
-        raw,
-        [
-            "volume",
-            "option_volume",
-        ],
-    )
-
-    oi_col = find_column(
-        raw,
-        [
-            "openInterest",
-            "open_interest",
-            "oi",
-        ],
-    )
-
     premium_col = find_column(
         raw,
         [
@@ -390,29 +287,6 @@ def prepare_data(raw):
         raw,
         [
             "delta",
-        ],
-    )
-
-    gamma_col = find_column(
-        raw,
-        [
-            "gamma",
-        ],
-    )
-
-    vega_col = find_column(
-        raw,
-        [
-            "vega",
-        ],
-    )
-
-    iv_col = find_column(
-        raw,
-        [
-            "impliedVolatility",
-            "implied_volatility",
-            "iv",
         ],
     )
 
@@ -442,78 +316,26 @@ def prepare_data(raw):
         ],
     )
 
-    # ========================================================
-    # REQUIRED COLUMN VALIDATION
-    # ========================================================
+    required = {
+        "symbol": symbol_col,
+        "option_type": option_type_col,
+        "side": side_col,
+        "strike": strike_col,
+        "delta": delta_col,
+        "price": price_col,
+    }
 
-    if symbol_col is None:
+    missing = [
+        name
+        for name, col in required.items()
+        if col is None
+    ]
 
-        raise ValueError(
-            "Symbol column not found"
-        )
-
-    if option_type_col is None:
-
-        raise ValueError(
-            "Option type column not found"
-        )
-
-    if side_col is None:
-
-        raise ValueError(
-            "Trade side column not found. "
-            "STEP 11 requires STEP 5 trade direction."
-        )
-
-    if strike_col is None:
+    if missing:
 
         raise ValueError(
-            "Strike column not found"
+            f"STEP 11 missing columns: {missing}"
         )
-
-    if delta_col is None:
-
-        raise ValueError(
-            "Delta column not found"
-        )
-
-    if price_col is None:
-
-        raise ValueError(
-            "Underlying/current price column not found"
-        )
-
-    # ========================================================
-    # LOG COLUMN MAPPING
-    # ========================================================
-
-    log(
-        f"SYMBOL COLUMN : {symbol_col}"
-    )
-
-    log(
-        f"OPTION TYPE   : {option_type_col}"
-    )
-
-    log(
-        f"SIDE COLUMN   : {side_col}"
-    )
-
-    log(
-        f"STRIKE COLUMN : {strike_col}"
-    )
-
-    log(
-        f"DELTA COLUMN  : {delta_col}"
-    )
-
-    log(
-        f"PRICE COLUMN  : {price_col}"
-    )
-
-    # ========================================================
-    # BUILD NORMALIZED DATAFRAME
-    # ========================================================
 
     result = pd.DataFrame(
         index=raw.index
@@ -550,7 +372,7 @@ def prepare_data(raw):
         dte_col,
     )
 
-    if expiration_col is not None:
+    if expiration_col:
 
         result["expiration"] = (
             raw[expiration_col]
@@ -563,39 +385,14 @@ def prepare_data(raw):
 
         result["expiration"] = pd.NaT
 
-    result["volume"] = numeric_series(
-        raw,
-        volume_col,
-    )
-
-    result["open_interest"] = numeric_series(
-        raw,
-        oi_col,
-    )
-
     result["premium"] = numeric_series(
         raw,
         premium_col,
-    )
+    ).fillna(0)
 
     result["delta"] = numeric_series(
         raw,
         delta_col,
-    )
-
-    result["gamma"] = numeric_series(
-        raw,
-        gamma_col,
-    )
-
-    result["vega"] = numeric_series(
-        raw,
-        vega_col,
-    )
-
-    result["iv"] = numeric_series(
-        raw,
-        iv_col,
     )
 
     result["current_price"] = numeric_series(
@@ -619,29 +416,25 @@ def prepare_data(raw):
 
 
 # ============================================================
-# BUILD SPECIAL STRUCTURES
+# BUILD
 # ============================================================
 
-def build_special_candidates(df):
-
-    # ========================================================
-    # CALL BUY
-    # ========================================================
+def build_candidates(df):
 
     calls = df[
         (df["option_type"] == "CALL")
         &
         (df["side"] == "BUY")
+        &
+        (df["delta"] > 0)
     ].copy()
-
-    # ========================================================
-    # PUT SELL
-    # ========================================================
 
     puts = df[
         (df["option_type"] == "PUT")
         &
         (df["side"] == "SELL")
+        &
+        (df["delta"] < 0)
     ].copy()
 
     log(
@@ -653,95 +446,57 @@ def build_special_candidates(df):
     )
 
     if calls.empty or puts.empty:
-
         return pd.DataFrame()
 
-    # ========================================================
-    # VALID TICKERS
-    # ========================================================
-
-    calls = calls[
-        calls["ticker"].ne("")
-    ].copy()
-
-    puts = puts[
-        puts["ticker"].ne("")
-    ].copy()
-
-    # ========================================================
-    # COMMON TICKERS
-    # ========================================================
-
-    common_tickers = sorted(
+    common = sorted(
         set(calls["ticker"])
         &
         set(puts["ticker"])
     )
 
-    log(
-        f"COMMON TICKERS : "
-        f"{len(common_tickers):,}"
-    )
-
-    if not common_tickers:
-
-        return pd.DataFrame()
-
     calls = calls[
-        calls["ticker"].isin(
-            common_tickers
-        )
-    ].copy()
+        calls["ticker"].isin(common)
+    ]
 
     puts = puts[
-        puts["ticker"].isin(
-            common_tickers
-        )
-    ].copy()
-
-    # ========================================================
-    # UNIQUE INTERNAL ROW ID
-    #
-    # IMPORTANT:
-    # Do NOT create _pair_key = 1.
-    #
-    # This avoids accidental column collisions
-    # and makes the merge deterministic.
-    # ========================================================
-
-    calls["_call_id"] = np.arange(
-        len(calls)
-    )
-
-    puts["_put_id"] = np.arange(
-        len(puts)
-    )
-
-    # ========================================================
-    # PAIR BY TICKER
-    # ========================================================
+        puts["ticker"].isin(common)
+    ]
 
     pairs = pd.merge(
         calls,
         puts,
         on="ticker",
-        how="inner",
         suffixes=(
             "_call",
             "_put",
         ),
     )
 
-    if pairs.empty:
-
-        return pd.DataFrame()
-
     log(
         f"RAW PAIRS : {len(pairs):,}"
     )
 
+    if pairs.empty:
+        return pairs
+
     # ========================================================
-    # DTE DISTANCE
+    # PRICE RELATION
+    # ========================================================
+
+    pairs = pairs[
+        pairs["strike_call"]
+        >=
+        pairs["current_price_call"]
+    ].copy()
+
+    pairs = pairs[
+        pairs["strike_put"]
+        <=
+        pairs["current_price_put"]
+    ].copy()
+
+    # ========================================================
+    # DTE
     # ========================================================
 
     pairs["dte_distance"] = (
@@ -755,985 +510,285 @@ def build_special_candidates(df):
         .fillna(999)
     )
 
-    # ========================================================
-    # EXPIRATION DISTANCE
-    # ========================================================
-
-    pairs["expiration_distance"] = (
-        pairs["expiration_call"]
-        -
-        pairs["expiration_put"]
-    ).abs().dt.days
-
-    pairs["expiration_distance"] = (
-        pairs["expiration_distance"]
-        .fillna(999)
-    )
-
-    # ========================================================
-    # EXPIRATION ALIGNMENT
-    #
-    # DTE OR expiration date within allowed distance.
-    # ========================================================
-
     pairs = pairs[
-        (
-            pairs["dte_distance"]
-            <= MAX_DTE_DISTANCE
-        )
-        |
-        (
-            pairs["expiration_distance"]
-            <= MAX_EXPIRATION_DISTANCE
-        )
+        pairs["dte_distance"]
+        <= MAX_DTE_DISTANCE
     ].copy()
 
     log(
-        f"AFTER EXPIRATION FILTER : "
-        f"{len(pairs):,}"
+        f"AFTER DTE FILTER : {len(pairs):,}"
     )
 
     if pairs.empty:
-
-        return pd.DataFrame()
-
-    # ========================================================
-    # CURRENT PRICE
-    # ========================================================
-
-    pairs["current_price"] = (
-        pairs["current_price_call"]
-        .combine_first(
-            pairs["current_price_put"]
-        )
-    )
-
-    # ========================================================
-    # BASIC DATA VALIDATION
-    # ========================================================
-
-    pairs = pairs[
-        pairs["current_price"].notna()
-        &
-        pairs["strike_call"].notna()
-        &
-        pairs["strike_put"].notna()
-        &
-        pairs["delta_call"].notna()
-        &
-        pairs["delta_put"].notna()
-    ].copy()
-
-    log(
-        f"AFTER DATA VALIDATION : "
-        f"{len(pairs):,}"
-    )
-
-    if pairs.empty:
-
-        return pd.DataFrame()
-
-    # ========================================================
-    # STRIKE RELATIONSHIP
-    #
-    # TRUE BULLISH STRUCTURE:
-    #
-    # CALL strike >= current price
-    # PUT strike  <= current price
-    #
-    # This prevents structures such as:
-    #
-    # current = 328
-    # call = 320
-    # put  = 335
-    #
-    # from being classified as clean bullish.
-    # ========================================================
-
-    pairs["call_bullish_strike"] = (
-        pairs["strike_call"]
-        >=
-        pairs["current_price"]
-    )
-
-    pairs["put_bullish_strike"] = (
-        pairs["strike_put"]
-        <=
-        pairs["current_price"]
-    )
-
-    # ========================================================
-    # DELTA CONFIRMATION
-    #
-    # CALL BUY -> positive delta
-    # PUT SELL -> negative delta
-    # ========================================================
-
-    pairs["call_delta_bullish"] = (
-        pairs["delta_call"]
-        > 0
-    )
-
-    pairs["put_delta_bullish"] = (
-        pairs["delta_put"]
-        < 0
-    )
-
-    # ========================================================
-    # STRICT BULLISH STRUCTURE FILTER
-    #
-    # ALL FOUR CONDITIONS MUST BE TRUE.
-    # ========================================================
-
-    pairs["structure_confirmation"] = (
-        pairs["call_delta_bullish"]
-        &
-        pairs["put_delta_bullish"]
-        &
-        pairs["call_bullish_strike"]
-        &
-        pairs["put_bullish_strike"]
-    )
-
-    log(
-        "STRUCTURE RULE : "
-        "CALL delta > 0 AND "
-        "PUT delta < 0 AND "
-        "CALL strike >= price AND "
-        "PUT strike <= price"
-    )
-
-    log(
-        f"STRICT BULLISH PAIRS : "
-        f"{pairs['structure_confirmation'].sum():,}"
-    )
-
-    pairs = pairs[
-        pairs["structure_confirmation"]
-    ].copy()
-
-    if pairs.empty:
-
-        return pd.DataFrame()
+        return pairs
 
     # ========================================================
     # PREMIUM
     # ========================================================
 
-    pairs["call_premium_abs"] = (
+    pairs["call_premium_value"] = (
         pairs["premium_call"]
-        .abs()
-        .fillna(0)
+        .clip(lower=0)
     )
 
-    pairs["put_premium_abs"] = (
+    pairs["put_premium_value"] = (
         pairs["premium_put"]
-        .abs()
-        .fillna(0)
+        .clip(lower=0)
     )
 
     pairs["combined_premium"] = (
-        pairs["call_premium_abs"]
+        pairs["call_premium_value"]
         +
-        pairs["put_premium_abs"]
+        pairs["put_premium_value"]
     )
 
-    # ========================================================
-    # VOLUME
-    # ========================================================
+    pairs = pairs[
+        pairs["combined_premium"] > 0
+    ].copy()
 
-    pairs["call_volume"] = (
-        pairs["volume_call"]
-        .fillna(0)
-    )
+    if pairs.empty:
+        return pairs
 
-    pairs["put_volume"] = (
-        pairs["volume_put"]
-        .fillna(0)
-    )
-
-    pairs["combined_volume"] = (
-        pairs["call_volume"]
-        +
-        pairs["put_volume"]
-    )
-
-    # ========================================================
-    # OI
-    # ========================================================
-
-    pairs["call_oi"] = (
-        pairs["open_interest_call"]
-        .fillna(0)
-    )
-
-    pairs["put_oi"] = (
-        pairs["open_interest_put"]
-        .fillna(0)
-    )
-
-    pairs["combined_oi"] = (
-        pairs["call_oi"]
-        +
-        pairs["put_oi"]
-    )
-
-    # ========================================================
-    # COMPONENT SCORES
-    # ========================================================
-
-    pairs["premium_score"] = minmax_score(
+    pairs["premium_ratio"] = (
+        pairs["call_premium_value"]
+        /
         pairs["combined_premium"]
     )
 
-    pairs["volume_score"] = minmax_score(
-        pairs["combined_volume"]
-    )
-
-    pairs["flow_score_component"] = (
-        minmax_score(
-            (
-                pairs["flow_score_call"]
-                .fillna(0)
-                +
-                pairs["flow_score_put"]
-                .fillna(0)
-            )
-            / 2.0
-        )
-    )
-
-    # ========================================================
-    # DIRECTION SCORE
-    #
-    # Stronger delta alignment gets higher score.
-    #
-    # Instead of only TRUE/FALSE:
-    # use absolute delta magnitude.
-    # ========================================================
-
-    call_delta_strength = (
-        pairs["delta_call"]
-        .clip(
-            lower=0,
-            upper=1,
-        )
-    )
-
-    put_delta_strength = (
-        pairs["delta_put"]
-        .abs()
-        .clip(
-            lower=0,
-            upper=1,
-        )
-    )
-
-    pairs["direction_score"] = (
+    # 너무 작은 한쪽 premium은
+    # 의미있는 RR이라고 보기 어렵다.
+    pairs = pairs[
         (
-            call_delta_strength
-            +
-            put_delta_strength
+            pairs["call_premium_value"]
+            >=
+            pairs["combined_premium"]
+            * MIN_RELATIVE_PREMIUM
         )
-        /
-        2.0
-        *
-        100.0
-    )
+        &
+        (
+            pairs["put_premium_value"]
+            >=
+            pairs["combined_premium"]
+            * MIN_RELATIVE_PREMIUM
+        )
+    ].copy()
+
+    if pairs.empty:
+        return pairs
 
     # ========================================================
-    # STRIKE SCORE
-    #
-    # Measure how close each strike is to current price.
-    #
-    # ATM / near-ATM structures receive higher score.
+    # DIRECTION QUALITY
     # ========================================================
 
-    call_distance_pct = (
-        (
-            pairs["strike_call"]
-            -
-            pairs["current_price"]
-        ).abs()
+    call_direction = (
+        pairs["call_premium_value"]
         /
-        pairs["current_price"]
-        *
-        100.0
+        pairs["combined_premium"]
     )
 
-    put_distance_pct = (
-        (
-            pairs["strike_put"]
-            -
-            pairs["current_price"]
-        ).abs()
+    put_direction = (
+        pairs["put_premium_value"]
         /
-        pairs["current_price"]
-        *
-        100.0
+        pairs["combined_premium"]
     )
 
-    avg_strike_distance = (
-        call_distance_pct
+    pairs["direction_quality"] = (
+        50
         +
-        put_distance_pct
-    ) / 2.0
-
-    pairs["strike_score"] = (
-        100.0
-        /
         (
-            1.0
-            +
-            avg_strike_distance
+            call_direction
+            -
+            put_direction
         )
-        * 100.0
+        * 50
+    )
+
+    # ========================================================
+    # FLOW QUALITY
+    # ========================================================
+
+    call_flow = (
+        pairs["flow_score_call"]
+        .fillna(0)
+    )
+
+    put_flow = (
+        pairs["flow_score_put"]
+        .fillna(0)
+    )
+
+    pairs["flow_quality"] = (
+        call_flow * 0.55
+        +
+        put_flow * 0.45
+    )
+
+    # ========================================================
+    # DISTANCE QUALITY
+    # ========================================================
+
+    call_price = (
+        pairs["current_price_call"]
+    )
+
+    put_distance = (
+        call_price
+        -
+        pairs["strike_put"]
+    ).abs() / call_price
+
+    call_distance = (
+        pairs["strike_call"]
+        -
+        call_price
+    ).abs() / call_price
+
+    pairs["distance_quality"] = (
+        100
+        -
+        (
+            call_distance
+            +
+            put_distance
+        )
+        * 100
     ).clip(
-        upper=100.0
+        lower=0,
+        upper=100,
     )
 
     # ========================================================
-    # EXPIRATION ALIGNMENT SCORE
+    # RR SCORE
     # ========================================================
 
-    pairs["expiry_alignment_score"] = np.where(
-        pairs["expiration_distance"] <= 1,
-        100.0,
-        np.where(
-            pairs["expiration_distance"] <= 3,
-            80.0,
-            np.where(
-                pairs["expiration_distance"] <= 7,
-                60.0,
-                0.0,
-            ),
-        ),
+    premium_score = minmax(
+        pairs["combined_premium"]
     )
 
-    # ========================================================
-    # SPECIAL SCORE
-    #
-    # Premium       25%
-    # Volume        15%
-    # Flow          20%
-    # Direction     20%
-    # Strike        15%
-    # Expiration     5%
-    # ========================================================
-
-    pairs["special_score"] = (
-
-        pairs["premium_score"]
-        * 0.25
-
+    pairs["rr_score"] = (
+        premium_score * 0.40
         +
-
-        pairs["volume_score"]
-        * 0.15
-
+        pairs["flow_quality"] * 0.25
         +
-
-        pairs["flow_score_component"]
-        * 0.20
-
+        pairs["direction_quality"] * 0.20
         +
-
-        pairs["direction_score"]
-        * 0.20
-
-        +
-
-        pairs["strike_score"]
-        * 0.15
-
-        +
-
-        pairs["expiry_alignment_score"]
-        * 0.05
+        pairs["distance_quality"] * 0.15
     )
 
-    # ========================================================
-    # STRUCTURE
-    # ========================================================
-
-    pairs["structure"] = (
-        "CALL BUY + PUT SELL"
-    )
-
-    pairs["special_reason"] = (
-        "CALL BUY confirmed | "
-        "PUT SELL confirmed | "
-        "Bullish delta confirmed | "
-        "Bullish strike structure confirmed"
-    )
-
-    # ========================================================
-    # REMOVE DUPLICATES
-    # ========================================================
-
+    # 실제 premium이 높은 것 우선
     pairs = pairs.sort_values(
         [
-            "ticker",
-            "special_score",
+            "rr_score",
             "combined_premium",
-            "combined_volume",
-        ],
-        ascending=[
-            True,
-            False,
-            False,
-            False,
-        ],
-    )
-
-    pairs = pairs.drop_duplicates(
-        subset=[
-            "ticker",
-            "strike_call",
-            "expiration_call",
-            "strike_put",
-            "expiration_put",
-        ],
-        keep="first",
-    )
-
-    # ========================================================
-    # GLOBAL RANK
-    # ========================================================
-
-    pairs = pairs.sort_values(
-        [
-            "special_score",
-            "combined_premium",
-            "combined_volume",
         ],
         ascending=False,
-    ).reset_index(
-        drop=True
     )
 
     # ========================================================
-    # MAX ONE STRUCTURE PER TICKER
+    # ONE BEST STRUCTURE PER TICKER
     # ========================================================
 
-    pairs = pairs.drop_duplicates(
-        subset=["ticker"],
-        keep="first",
+    pairs = (
+        pairs
+        .drop_duplicates(
+            "ticker",
+            keep="first",
+        )
     )
 
-    pairs = pairs.head(
+    return pairs.head(
         MAX_RESULTS
-    ).copy()
-
-    pairs["special_rank"] = (
-        np.arange(
-            len(pairs)
-        )
-        + 1
-    )
-
-    return pairs
-
-
-# ============================================================
-# OUTPUT COLUMNS
-# ============================================================
-
-OUTPUT_COLUMNS = [
-
-    "special_rank",
-    "ticker",
-    "structure",
-    "special_score",
-    "current_price",
-
-    "call_strike",
-    "call_expiration",
-    "call_DTE",
-    "call_volume",
-    "call_open_interest",
-    "call_premium",
-    "call_delta",
-    "call_gamma",
-    "call_vega",
-    "call_iv",
-    "call_flow_score",
-
-    "put_strike",
-    "put_expiration",
-    "put_DTE",
-    "put_volume",
-    "put_open_interest",
-    "put_premium",
-    "put_delta",
-    "put_gamma",
-    "put_vega",
-    "put_iv",
-    "put_flow_score",
-
-    "combined_premium",
-    "combined_volume",
-    "combined_oi",
-
-    "dte_distance",
-    "expiration_distance",
-
-    "special_reason",
-    "data_source",
-]
-
-
-# ============================================================
-# EMPTY OUTPUT
-# ============================================================
-
-def create_empty_output():
-
-    return pd.DataFrame(
-        columns=OUTPUT_COLUMNS
     )
 
 
 # ============================================================
-# FORMAT OUTPUT
+# OUTPUT
 # ============================================================
 
-def format_output(pairs):
+def build_output(pairs):
 
-    if pairs is None or pairs.empty:
+    if pairs.empty:
 
-        return create_empty_output()
-
-    output = pd.DataFrame(
-        index=pairs.index
-    )
-
-    output["special_rank"] = (
-        pairs["special_rank"]
-    )
-
-    output["ticker"] = (
-        pairs["ticker"]
-    )
-
-    output["structure"] = (
-        pairs["structure"]
-    )
-
-    output["special_score"] = (
-        pairs["special_score"]
-        .round(2)
-    )
-
-    output["current_price"] = (
-        pairs["current_price"]
-        .round(4)
-    )
-
-    # ========================================================
-    # CALL
-    # ========================================================
-
-    output["call_strike"] = (
-        pairs["strike_call"]
-    )
-
-    output["call_expiration"] = (
-        pairs["expiration_call"]
-        .dt.strftime(
-            "%Y-%m-%d"
-        )
-    )
-
-    output["call_DTE"] = (
-        pairs["DTE_call"]
-    )
-
-    output["call_volume"] = (
-        pairs["volume_call"]
-    )
-
-    output["call_open_interest"] = (
-        pairs["open_interest_call"]
-    )
-
-    output["call_premium"] = (
-        pairs["premium_call"]
-    )
-
-    output["call_delta"] = (
-        pairs["delta_call"]
-    )
-
-    output["call_gamma"] = (
-        pairs["gamma_call"]
-    )
-
-    output["call_vega"] = (
-        pairs["vega_call"]
-    )
-
-    output["call_iv"] = (
-        pairs["iv_call"]
-    )
-
-    output["call_flow_score"] = (
-        pairs["flow_score_call"]
-    )
-
-    # ========================================================
-    # PUT
-    # ========================================================
-
-    output["put_strike"] = (
-        pairs["strike_put"]
-    )
-
-    output["put_expiration"] = (
-        pairs["expiration_put"]
-        .dt.strftime(
-            "%Y-%m-%d"
-        )
-    )
-
-    output["put_DTE"] = (
-        pairs["DTE_put"]
-    )
-
-    output["put_volume"] = (
-        pairs["volume_put"]
-    )
-
-    output["put_open_interest"] = (
-        pairs["open_interest_put"]
-    )
-
-    output["put_premium"] = (
-        pairs["premium_put"]
-    )
-
-    output["put_delta"] = (
-        pairs["delta_put"]
-    )
-
-    output["put_gamma"] = (
-        pairs["gamma_put"]
-    )
-
-    output["put_vega"] = (
-        pairs["vega_put"]
-    )
-
-    output["put_iv"] = (
-        pairs["iv_put"]
-    )
-
-    output["put_flow_score"] = (
-        pairs["flow_score_put"]
-    )
-
-    # ========================================================
-    # COMBINED
-    # ========================================================
-
-    output["combined_premium"] = (
-        pairs["combined_premium"]
-    )
-
-    output["combined_volume"] = (
-        pairs["combined_volume"]
-    )
-
-    output["combined_oi"] = (
-        pairs["combined_oi"]
-    )
-
-    output["dte_distance"] = (
-        pairs["dte_distance"]
-    )
-
-    output["expiration_distance"] = (
-        pairs["expiration_distance"]
-    )
-
-    output["special_reason"] = (
-        pairs["special_reason"]
-    )
-
-    output["data_source"] = (
-        "CALCULATED_FROM_UNUSUAL_FLOW"
-    )
-
-    return output[
-        OUTPUT_COLUMNS
-    ]
-
-
-# ============================================================
-# MARKDOWN
-# ============================================================
-
-def create_markdown(df):
-
-    lines = []
-
-    lines.append(
-        "# STEP 11 - SPECIAL LIST"
-    )
-
-    lines.append("")
-
-    lines.append(
-        "## CALL BUY + PUT SELL"
-    )
-
-    lines.append("")
-
-    lines.append(
-        "**STRICT BULLISH STRUCTURE**"
-    )
-
-    lines.append("")
-
-    lines.append(
-        "- CALL BUY"
-    )
-
-    lines.append(
-        "- PUT SELL"
-    )
-
-    lines.append(
-        "- CALL Delta > 0"
-    )
-
-    lines.append(
-        "- PUT Delta < 0"
-    )
-
-    lines.append(
-        "- CALL Strike >= Current Price"
-    )
-
-    lines.append(
-        "- PUT Strike <= Current Price"
-    )
-
-    lines.append("")
-
-    if df.empty:
-
-        lines.append(
-            "오늘 확인된 "
-            "CALL BUY + PUT SELL "
-            "엄격한 강세 구조가 없습니다."
+        return pd.DataFrame(
+            columns=[
+                "rank",
+                "ticker",
+                "rr_score",
+                "structure",
+                "call_buy_estimate",
+                "call_strike",
+                "call_dte",
+                "call_premium",
+                "put_sell_estimate",
+                "put_strike",
+                "put_dte",
+                "put_premium",
+                "combined_premium",
+                "premium_ratio",
+                "direction_quality",
+                "flow_quality",
+            ]
         )
 
-        lines.append("")
+    rows = []
 
-        lines.append(
-            "※ 0건도 정상 결과입니다."
-        )
+    for rank, (_, row) in enumerate(
+        pairs.iterrows(),
+        start=1,
+    ):
 
-        lines.append("")
+        rows.append({
 
-        lines.append(
-            "**SPECIAL LIST : 0**"
-        )
+            "rank": rank,
 
-        lines.append("")
+            "ticker": row["ticker"],
 
-        return "\n".join(lines)
+            "rr_score": round(
+                float(row["rr_score"]),
+                2,
+            ),
 
-    lines.append(
-        f"**SPECIAL LIST : {len(df)}**"
-    )
+            "structure":
+                "CALL BUY + PUT SELL",
 
-    lines.append("")
+            "call_buy_estimate":
+                "CALL BUY EST.",
 
-    for _, row in df.iterrows():
+            "call_strike":
+                row["strike_call"],
 
-        rank = int(
-            row["special_rank"]
-        )
+            "call_dte":
+                row["DTE_call"],
 
-        ticker = row["ticker"]
+            "call_premium":
+                row["call_premium_value"],
 
-        score = float(
-            row["special_score"]
-        )
+            "put_sell_estimate":
+                "PUT SELL EST.",
 
-        current_price = row[
-            "current_price"
-        ]
+            "put_strike":
+                row["strike_put"],
 
-        lines.append(
-            f"## #{rank} {ticker}"
-        )
+            "put_dte":
+                row["DTE_put"],
 
-        lines.append("")
+            "put_premium":
+                row["put_premium_value"],
 
-        lines.append(
-            "**구조: CALL BUY + PUT SELL**"
-        )
+            "combined_premium":
+                row["combined_premium"],
 
-        lines.append(
-            f"- Special Score: **{score:.2f}**"
-        )
+            "premium_ratio":
+                row["premium_ratio"],
 
-        if pd.notna(current_price):
+            "direction_quality":
+                row["direction_quality"],
 
-            lines.append(
-                f"- 현재가: **{current_price:.2f}**"
-            )
+            "flow_quality":
+                row["flow_quality"],
+        })
 
-        lines.append("")
-
-        # ====================================================
-        # CALL
-        # ====================================================
-
-        lines.append(
-            "### CALL BUY"
-        )
-
-        lines.append(
-            f"- Strike: "
-            f"{row['call_strike']}"
-        )
-
-        lines.append(
-            f"- Expiration: "
-            f"{row['call_expiration']}"
-        )
-
-        lines.append(
-            f"- DTE: "
-            f"{row['call_DTE']}"
-        )
-
-        lines.append(
-            f"- Volume: "
-            f"{row['call_volume']}"
-        )
-
-        lines.append(
-            f"- OI: "
-            f"{row['call_open_interest']}"
-        )
-
-        lines.append(
-            f"- Premium: "
-            f"{row['call_premium']}"
-        )
-
-        lines.append(
-            f"- Delta: "
-            f"{row['call_delta']}"
-        )
-
-        lines.append(
-            f"- Gamma: "
-            f"{row['call_gamma']}"
-        )
-
-        lines.append("")
-
-        # ====================================================
-        # PUT
-        # ====================================================
-
-        lines.append(
-            "### PUT SELL"
-        )
-
-        lines.append(
-            f"- Strike: "
-            f"{row['put_strike']}"
-        )
-
-        lines.append(
-            f"- Expiration: "
-            f"{row['put_expiration']}"
-        )
-
-        lines.append(
-            f"- DTE: "
-            f"{row['put_DTE']}"
-        )
-
-        lines.append(
-            f"- Volume: "
-            f"{row['put_volume']}"
-        )
-
-        lines.append(
-            f"- OI: "
-            f"{row['put_open_interest']}"
-        )
-
-        lines.append(
-            f"- Premium: "
-            f"{row['put_premium']}"
-        )
-
-        lines.append(
-            f"- Delta: "
-            f"{row['put_delta']}"
-        )
-
-        lines.append(
-            f"- Gamma: "
-            f"{row['put_gamma']}"
-        )
-
-        lines.append("")
-
-        # ====================================================
-        # STRUCTURE
-        # ====================================================
-
-        lines.append(
-            "### Structure"
-        )
-
-        lines.append(
-            f"- Combined Premium: "
-            f"{row['combined_premium']}"
-        )
-
-        lines.append(
-            f"- Combined Volume: "
-            f"{row['combined_volume']}"
-        )
-
-        lines.append(
-            f"- Combined OI: "
-            f"{row['combined_oi']}"
-        )
-
-        lines.append(
-            f"- DTE Distance: "
-            f"{row['dte_distance']}"
-        )
-
-        lines.append(
-            f"- Expiration Distance: "
-            f"{row['expiration_distance']}"
-        )
-
-        lines.append(
-            f"- Reason: "
-            f"{row['special_reason']}"
-        )
-
-        lines.append("")
-
-        lines.append("---")
-
-        lines.append("")
-
-    return "\n".join(lines)
+    return pd.DataFrame(rows)
 
 
 # ============================================================
@@ -1742,331 +797,139 @@ def create_markdown(df):
 
 def main():
 
-    log("START")
+    print()
+    print("============================================================")
+    print("STEP 11 SPECIAL LIST")
+    print("============================================================")
 
-    # ========================================================
-    # OUTPUT DIRECTORY
-    # ========================================================
+    if not os.path.exists(INPUT_FILE):
+        raise FileNotFoundError(
+            INPUT_FILE
+        )
+
+    raw = pd.read_csv(
+        INPUT_FILE
+    )
+
+    log(
+        f"INPUT ROWS : {len(raw):,}"
+    )
+
+    df = prepare_data(
+        raw
+    )
+
+    pairs = build_candidates(
+        df
+    )
+
+    result = build_output(
+        pairs
+    )
 
     os.makedirs(
         OUTPUT_DIR,
         exist_ok=True,
     )
 
-    # ========================================================
-    # INPUT CHECK
-    # ========================================================
-
-    if not os.path.exists(
-        INPUT_FILE
-    ):
-
-        raise FileNotFoundError(
-            f"Input file not found: "
-            f"{INPUT_FILE}"
-        )
-
-    log(
-        f"INPUT : {INPUT_FILE}"
-    )
-
-    # ========================================================
-    # READ
-    # ========================================================
-
-    raw = pd.read_csv(
-        INPUT_FILE
-    )
-
-    input_rows = len(raw)
-
-    log(
-        f"INPUT ROWS : "
-        f"{input_rows:,}"
-    )
-
-    # ========================================================
-    # PREPARE
-    # ========================================================
-
-    df = prepare_data(
-        raw
-    )
-
-    log(
-        f"PREPARED ROWS : "
-        f"{len(df):,}"
-    )
-
-    # ========================================================
-    # SIDE VALIDATION
-    # ========================================================
-
-    call_buy_rows = (
-        (
-            df["option_type"]
-            == "CALL"
-        )
-        &
-        (
-            df["side"]
-            == "BUY"
-        )
-    ).sum()
-
-    put_sell_rows = (
-        (
-            df["option_type"]
-            == "PUT"
-        )
-        &
-        (
-            df["side"]
-            == "SELL"
-        )
-    ).sum()
-
-    unknown_side_rows = (
-        df["side"]
-        == ""
-    ).sum()
-
-    log(
-        f"CALL BUY ROWS : "
-        f"{call_buy_rows:,}"
-    )
-
-    log(
-        f"PUT SELL ROWS : "
-        f"{put_sell_rows:,}"
-    )
-
-    log(
-        f"UNKNOWN SIDE ROWS : "
-        f"{unknown_side_rows:,}"
-    )
-
-    # ========================================================
-    # SEARCH
-    # ========================================================
-
-    candidates = (
-        build_special_candidates(
-            df
-        )
-    )
-
-    # ========================================================
-    # FORMAT
-    # ========================================================
-
-    output = format_output(
-        candidates
-    )
-
-    # ========================================================
-    # SAVE CSV
-    # ========================================================
-
-    output.to_csv(
+    result.to_csv(
         OUTPUT_CSV,
         index=False,
-    )
-
-    # ========================================================
-    # SAVE MARKDOWN
-    # ========================================================
-
-    markdown = create_markdown(
-        output
     )
 
     with open(
         OUTPUT_MD,
         "w",
         encoding="utf-8",
-    ) as file:
+    ) as f:
 
-        file.write(
-            markdown
+        f.write(
+            "# STEP 11 SPECIAL LIST\n\n"
         )
 
-    # ========================================================
-    # VALIDATION
-    # ========================================================
+        for _, row in result.iterrows():
 
-    print()
-
-    print(
-        "=" * 72
-    )
-
-    print(
-        "🔎 STEP 11 VALIDATION"
-    )
-
-    print(
-        "=" * 72
-    )
-
-    print(
-        f"INPUT ROWS       : "
-        f"{input_rows:,}"
-    )
-
-    print(
-        f"CALL BUY ROWS    : "
-        f"{call_buy_rows:,}"
-    )
-
-    print(
-        f"PUT SELL ROWS    : "
-        f"{put_sell_rows:,}"
-    )
-
-    print(
-        f"UNKNOWN SIDE     : "
-        f"{unknown_side_rows:,}"
-    )
-
-    print(
-        f"SPECIAL ROWS     : "
-        f"{len(output):,}"
-    )
-
-    print(
-        f"SPECIAL TICKERS  : "
-        f"{output['ticker'].nunique():,}"
-    )
-
-    print(
-        f"SCORE VALID      : "
-        f"{output['special_score'].notna().sum():,}"
-    )
-
-    print()
-
-    print(
-        "STRUCTURE        : "
-        "CALL BUY + PUT SELL"
-    )
-
-    print(
-        "FILTER           : "
-        "STRICT BULLISH"
-    )
-
-    print(
-        "CALL DELTA       : > 0"
-    )
-
-    print(
-        "PUT DELTA        : < 0"
-    )
-
-    print(
-        "CALL STRIKE      : >= CURRENT PRICE"
-    )
-
-    print(
-        "PUT STRIKE       : <= CURRENT PRICE"
-    )
-
-    print(
-        "SIDE SOURCE      : "
-        f"{find_column(raw, ['trade_side', 'trade_side_estimate', 'trade_direction', 'side'])}"
-    )
-
-    print(
-        "SIDE TYPE        : "
-        "ESTIMATED_BID_ASK_LAST"
-    )
-
-    print()
-
-    # ========================================================
-    # PREVIEW
-    # ========================================================
-
-    if not output.empty:
-
-        print(
-            "## SPECIAL PREVIEW"
-        )
-
-        print()
-
-        preview_columns = [
-
-            "special_rank",
-            "ticker",
-            "special_score",
-            "current_price",
-
-            "call_strike",
-            "call_DTE",
-
-            "put_strike",
-            "put_DTE",
-
-            "combined_premium",
-
-        ]
-
-        print(
-            output[
-                preview_columns
-            ].to_string(
-                index=False
+            f.write(
+                f"## {int(row['rank'])}. "
+                f"{row['ticker']}\n\n"
             )
-        )
 
-        print()
+            f.write(
+                f"- RR Score: "
+                f"{row['rr_score']:.2f}\n"
+            )
+
+            f.write(
+                "- CALL BUY EST.\n"
+            )
+
+            f.write(
+                f"  - Strike: "
+                f"{row['call_strike']}\n"
+            )
+
+            f.write(
+                f"  - DTE: "
+                f"{row['call_dte']}\n"
+            )
+
+            f.write(
+                f"  - Premium: "
+                f"{row['call_premium']}\n"
+            )
+
+            f.write(
+                "- PUT SELL EST.\n"
+            )
+
+            f.write(
+                f"  - Strike: "
+                f"{row['put_strike']}\n"
+            )
+
+            f.write(
+                f"  - DTE: "
+                f"{row['put_dte']}\n"
+            )
+
+            f.write(
+                f"  - Premium: "
+                f"{row['put_premium']}\n"
+            )
+
+            f.write(
+                "\n🔥 BULLISH RISK-REVERSAL\n\n"
+            )
+
+    print()
+    print("STEP 11 OUTPUT CHECK")
+
+    print(
+        f"ROWS              : {len(result)}"
+    )
+
+    print(
+        f"SPECIAL SCORE     : "
+        f"{result['rr_score'].notna().sum()}"
+    )
+
+    if not result.empty:
+
+        print(
+            "CALL BUY + PUT SELL: "
+            f"{len(result)}"
+        )
 
     else:
 
         print(
-            "## SPECIAL PREVIEW"
+            "CALL BUY + PUT SELL: 0"
         )
 
-        print()
-
-        print(
-            "NO STRICT BULLISH "
-            "CALL BUY + PUT SELL "
-            "STRUCTURE FOUND"
-        )
-
-        print()
-
-    # ========================================================
-    # OUTPUT PATH
-    # ========================================================
-
     print(
-        f"CSV              : "
-        f"{OUTPUT_CSV}"
+        "STEP 11 OUTPUT : OK"
     )
 
-    print(
-        f"MARKDOWN         : "
-        f"{OUTPUT_MD}"
-    )
-
-    print(
-        "=" * 72
-    )
-
-    log(
-        "STEP 11 SPECIAL LIST COMPLETE"
-    )
-
-
-# ============================================================
-# ENTRY POINT
-# ============================================================
 
 if __name__ == "__main__":
-
     main()
-
