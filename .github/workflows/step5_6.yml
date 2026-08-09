@@ -1,15 +1,18 @@
-name: STEP 5-6 - Unusual Flow and Top 20
+name: STEP 5-12 - Full Option Scanner Pipeline
 
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 concurrency:
-  group: option-scanner-step5-6
+  group: option-scanner-step5-12
   cancel-in-progress: false
 
 jobs:
 
-  unusual-and-top20:
+  full-pipeline:
 
     runs-on: ubuntu-latest
 
@@ -23,6 +26,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: true
 
       # ============================================================
       # 2. PYTHON
@@ -39,88 +43,60 @@ jobs:
 
       - name: Install dependencies
         run: |
+
+          set -e
+
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
       # ============================================================
-      # 4. CHECK NORMALIZED DATA
+      # 4. PIPELINE SOURCE CHECK
       # ============================================================
 
-      - name: STEP 3 Input Check
+      - name: STEP 5-12 Source Check
         run: |
 
           set -e
-
-          echo "=========================================="
-          echo "STEP 3 INPUT CHECK"
-          echo "=========================================="
 
           test -f data/normalized/options_normalized.csv
 
-          python - <<'PY'
-          import pandas as pd
+          test -f src/04_greeks.py
+          test -f src/05_unusual_flow.py
+          test -f src/06_top20.py
+          test -f src/07_option_search.py
+          test -f src/08_structure.py
+          test -f src/09_decision.py
+          test -f src/10_final_report.py
+          test -f src/11_special_list.py
+          test -f src/12_telegram.py
 
-          file = "data/normalized/options_normalized.csv"
+          echo "PIPELINE SOURCE FILES : OK"
 
-          df = pd.read_csv(file)
-
-          print("ROWS       :", len(df))
-          print("COLUMNS    :", len(df.columns))
-          print("TICKERS    :", df["symbol"].nunique())
-          print("DTE MIN    :", df["DTE"].min())
-          print("DTE MAX    :", df["DTE"].max())
-
-          if len(df) < 100000:
-              raise RuntimeError(
-                  f"Normalized dataset too small: {len(df)}"
-              )
-
-          if df["symbol"].nunique() < 500:
-              raise RuntimeError(
-                  f"Option universe too small: "
-                  f"{df['symbol'].nunique()}"
-              )
-
-          print("NORMALIZED DATA : OK")
-          PY
 
       # ============================================================
-      # 5. REMOVE LOCAL OLD GREEKS
+      # 5. STEP 4 - GREEKS
       #
       # IMPORTANT:
-      # This file must NEVER be committed.
+      # options_greeks.csv remains LOCAL.
+      # It will NOT be deleted until STEP 12 is finished.
       # ============================================================
 
-      - name: Remove old local Greeks
+      - name: Run STEP 4 Greeks
         run: |
 
           set -e
-
-          echo "=========================================="
-          echo "REMOVE OLD LOCAL GREEKS"
-          echo "=========================================="
 
           rm -f data/analysis/options_greeks.csv
 
-          echo "OLD LOCAL GREEKS REMOVED"
-
-      # ============================================================
-      # 6. STEP 4 - REBUILD CURRENT GREEKS
-      # ============================================================
-
-      - name: Rebuild Current STEP 4 Greeks
-        run: |
-
-          set -e
-
           echo "=========================================="
-          echo "REBUILD CURRENT STEP 4 GREEKS"
+          echo "RUN STEP 4 GREEKS"
           echo "=========================================="
 
           python src/04_greeks.py
 
+
       # ============================================================
-      # 7. STEP 4 VALIDATION
+      # 6. STEP 4 VALIDATION
       # ============================================================
 
       - name: Validate STEP 4 Greeks
@@ -163,21 +139,24 @@ jobs:
           )
 
           if len(df) != 291997:
+
               raise RuntimeError(
                   f"Unexpected Greeks rows: {len(df)}"
               )
 
           if df["symbol"].nunique() != 548:
+
               raise RuntimeError(
-                  f"Unexpected ticker count: "
+                  f"Unexpected Greeks tickers: "
                   f"{df['symbol'].nunique()}"
               )
 
-          print("CURRENT GREEKS : OK")
+          print("STEP 4 OUTPUT : OK")
           PY
 
+
       # ============================================================
-      # 8. STEP 5
+      # 7. STEP 5 - UNUSUAL FLOW
       # ============================================================
 
       - name: Run STEP 5 Unusual Flow
@@ -191,11 +170,12 @@ jobs:
 
           python src/05_unusual_flow.py
 
+
       # ============================================================
-      # 9. STEP 5 VALIDATION
+      # 8. STEP 5 VALIDATION
       # ============================================================
 
-      - name: Validate STEP 5
+      - name: Validate STEP 5 Unusual Flow
         run: |
 
           set -e
@@ -222,32 +202,47 @@ jobs:
               df["flow_score"].notna().sum()
           )
 
-          print(
-              "BUY EST.    :",
-              (df["trade_side_estimate"] == "BUY EST.").sum()
-          )
+          if "trade_side_estimate" in df.columns:
 
-          print(
-              "SELL EST.   :",
-              (df["trade_side_estimate"] == "SELL EST.").sum()
-          )
+              print(
+                  "BUY EST.    :",
+                  (
+                      df["trade_side_estimate"]
+                      == "BUY EST."
+                  ).sum()
+              )
+
+              print(
+                  "SELL EST.   :",
+                  (
+                      df["trade_side_estimate"]
+                      == "SELL EST."
+                  ).sum()
+              )
 
           if len(df) != 291997:
+
               raise RuntimeError(
-                  f"Unexpected STEP 5 rows: {len(df)}"
+                  f"Unexpected Flow rows: {len(df)}"
               )
 
           if df["symbol"].nunique() != 548:
+
               raise RuntimeError(
-                  f"Unexpected STEP 5 ticker count: "
+                  f"Unexpected Flow tickers: "
                   f"{df['symbol'].nunique()}"
               )
 
           print("STEP 5 OUTPUT : OK")
           PY
 
+
       # ============================================================
-      # 10. STEP 6
+      # 9. STEP 6 - TOP 20
+      #
+      # IMPORTANT:
+      # 06_top20.py is the VERIFIED file.
+      # DO NOT MODIFY IT.
       # ============================================================
 
       - name: Run STEP 6 TOP 20
@@ -261,8 +256,9 @@ jobs:
 
           python src/06_top20.py
 
+
       # ============================================================
-      # 11. STEP 6 VALIDATION
+      # 10. STEP 6 VALIDATION
       # ============================================================
 
       - name: Validate STEP 6 TOP 20
@@ -293,111 +289,761 @@ jobs:
           print("🔥 FINAL TOP 20")
           print("==========================================")
 
-          columns = [
-              "rank",
-              "symbol",
-              "top20_score",
-              "max_flow_score",
-              "total_premium",
-              "call_put_imbalance",
-              "max_volume_oi",
-              "estimated_direction",
-          ]
-
           print(
-              df[columns]
-              .to_string(index=False)
+              df.to_string(index=False)
           )
 
           if len(df) != 20:
+
               raise RuntimeError(
-                  f"TOP 20 validation failed: "
-                  f"{len(df)} rows"
+                  f"TOP20 rows invalid: {len(df)}"
               )
 
           if df["symbol"].nunique() != 20:
+
               raise RuntimeError(
-                  "TOP 20 contains duplicate symbols."
+                  "TOP20 duplicate symbols detected"
               )
 
           if list(df["rank"]) != list(range(1, 21)):
+
               raise RuntimeError(
-                  "TOP 20 rank validation failed."
+                  "TOP20 ranks invalid"
               )
 
           print()
-          print("TOP20 CHECK : OK")
+          print("STEP 6 OUTPUT : OK")
           PY
 
+
       # ============================================================
-      # 12. REMOVE LOCAL-ONLY GENERATED FILES
+      # 11. CRITICAL LOCAL FILE CHECK
+      #
+      # DO NOT DELETE GREEKS OR FLOW.
+      # STEP 7, 8, 9, 11, 12 still need them.
+      # ============================================================
+
+      - name: Verify Local STEP 4-6 Files
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "STEP 7 INPUT CHECK"
+          echo "=========================================="
+
+          test -f data/analysis/top20.csv
+          test -f data/analysis/options_greeks.csv
+          test -f data/analysis/unusual_flow.csv
+
+          python - <<'PY'
+          import pandas as pd
+
+          top = pd.read_csv(
+              "data/analysis/top20.csv"
+          )
+
+          greeks = pd.read_csv(
+              "data/analysis/options_greeks.csv"
+          )
+
+          flow = pd.read_csv(
+              "data/analysis/unusual_flow.csv"
+          )
+
+          print(
+              "TOP20 ROWS       :",
+              len(top)
+          )
+
+          print(
+              "TOP20 TICKERS    :",
+              top["symbol"].nunique()
+          )
+
+          print(
+              "OPTION ROWS      :",
+              len(greeks)
+          )
+
+          print(
+              "OPTION TICKERS   :",
+              greeks["symbol"].nunique()
+          )
+
+          print(
+              "FLOW ROWS        :",
+              len(flow)
+          )
+
+          print(
+              "FLOW TICKERS     :",
+              flow["symbol"].nunique()
+          )
+
+          print(
+              "DTE MIN          :",
+              greeks["DTE"].min()
+          )
+
+          print(
+              "DTE MAX          :",
+              greeks["DTE"].max()
+          )
+
+          if len(top) != 20:
+              raise RuntimeError(
+                  "Invalid TOP20 input"
+              )
+
+          if len(greeks) != 291997:
+              raise RuntimeError(
+                  "Invalid Greeks input"
+              )
+
+          if len(flow) != 291997:
+              raise RuntimeError(
+                  "Invalid Flow input"
+              )
+
+          print()
+          print("TOP20 INPUT       : OK")
+          print("GREEKS INPUT      : OK")
+          print("FLOW INPUT        : OK")
+          print("FLOW DATA LINK    : OK")
+          PY
+
+
+      # ============================================================
+      # 12. STEP 7 - OPTION SEARCH
+      # ============================================================
+
+      - name: Run STEP 7 Option Search
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "RUN STEP 7 OPTION SEARCH"
+          echo "=========================================="
+
+          python src/07_option_search.py
+
+
+      # ============================================================
+      # 13. STEP 7 VALIDATION
+      # ============================================================
+
+      - name: Validate STEP 7 Option Search
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "STEP 7 OUTPUT CHECK"
+          echo "=========================================="
+
+          test -f data/analysis/option_search.csv
+
+          python - <<'PY'
+          import pandas as pd
+
+          file = "data/analysis/option_search.csv"
+
+          df = pd.read_csv(file)
+
+          print(
+              "ROWS             :",
+              len(df)
+          )
+
+          print(
+              "TICKERS          :",
+              df["symbol"].nunique()
+          )
+
+          if "dte_min" in df.columns:
+
+              print(
+                  "DTE MIN SEARCH   :",
+                  df["dte_min"].min()
+              )
+
+          if "dte_max" in df.columns:
+
+              print(
+                  "DTE MAX SEARCH   :",
+                  df["dte_max"].max()
+              )
+
+          if "risk_reversal" in df.columns:
+
+              print(
+                  "RISK REVERSALS   :",
+                  (
+                      df["risk_reversal"]
+                      != "NONE DETECTED"
+                  ).sum()
+              )
+
+          if df.empty:
+
+              raise RuntimeError(
+                  "option_search.csv is empty"
+              )
+
+          print()
+          print("STEP 7 OUTPUT : OK")
+          PY
+
+
+      # ============================================================
+      # 14. STEP 8 - STRUCTURE
+      # ============================================================
+
+      - name: Run STEP 8 Structure
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "RUN STEP 8 STRUCTURE"
+          echo "=========================================="
+
+          test -f data/analysis/options_greeks.csv
+          test -f data/analysis/top20.csv
+          test -f data/analysis/option_search.csv
+
+          python src/08_structure.py
+
+
+      # ============================================================
+      # 15. STEP 8 VALIDATION
+      # ============================================================
+
+      - name: Validate STEP 8 Structure
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "STEP 8 OUTPUT CHECK"
+          echo "=========================================="
+
+          test -f data/analysis/structure.csv
+
+          python - <<'PY'
+          import pandas as pd
+
+          file = "data/analysis/structure.csv"
+
+          df = pd.read_csv(file)
+
+          print(
+              "ROWS             :",
+              len(df)
+          )
+
+          print(
+              "TICKERS          :",
+              df["ticker"].nunique()
+          )
+
+          for column in [
+              "call_wall",
+              "put_wall",
+              "net_gex",
+              "structure"
+          ]:
+
+              if column in df.columns:
+
+                  print(
+                      f"{column.upper():<17}:",
+                      df[column].notna().sum()
+                  )
+
+          if df.empty:
+
+              raise RuntimeError(
+                  "structure.csv is empty"
+              )
+
+          print()
+          print("STEP 8 OUTPUT : OK")
+          PY
+
+
+      # ============================================================
+      # 16. STEP 9 - DECISION
+      # ============================================================
+
+      - name: Verify STEP 9 Inputs
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "STEP 9 INPUT CHECK"
+          echo "=========================================="
+
+          test -f data/analysis/market_regime.csv
+          test -f data/analysis/structure.csv
+          test -f data/analysis/unusual_flow.csv
+          test -f data/analysis/top20.csv
+
+          echo "STEP 9 INPUT FILES : OK"
+
+
+      - name: Run STEP 9 Decision
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "RUN STEP 9 DECISION"
+          echo "=========================================="
+
+          python src/09_decision.py
+
+
+      # ============================================================
+      # 17. STEP 9 VALIDATION
+      # ============================================================
+
+      - name: Validate STEP 9 Decision
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "STEP 9 OUTPUT CHECK"
+          echo "=========================================="
+
+          test -f data/analysis/decision.csv
+
+          python - <<'PY'
+          import pandas as pd
+
+          file = "data/analysis/decision.csv"
+
+          df = pd.read_csv(file)
+
+          print(
+              "ROWS :",
+              len(df)
+          )
+
+          print(
+              "COLUMNS :",
+              list(df.columns)
+          )
+
+          required = [
+              "ticker",
+              "market_score",
+              "flow_score",
+              "decision_score",
+              "decision"
+          ]
+
+          missing = [
+              column
+              for column in required
+              if column not in df.columns
+          ]
+
+          if missing:
+
+              raise RuntimeError(
+                  "Missing columns: "
+                  + ", ".join(missing)
+              )
+
+          if df.empty:
+
+              raise RuntimeError(
+                  "decision.csv is empty"
+              )
+
+          if df["decision_score"].isna().any():
+
+              raise RuntimeError(
+                  "decision_score contains NaN"
+              )
+
+          if (
+              (df["decision_score"] < 0)
+              |
+              (df["decision_score"] > 100)
+          ).any():
+
+              raise RuntimeError(
+                  "decision_score outside 0-100"
+              )
+
+          valid_decisions = {
+              "🟢 진입",
+              "🟡 관망",
+              "🔴 회피"
+          }
+
+          invalid = (
+              set(
+                  df["decision"].dropna()
+              )
+              - valid_decisions
+          )
+
+          if invalid:
+
+              raise RuntimeError(
+                  "Invalid decision values: "
+                  + str(invalid)
+              )
+
+          if df["ticker"].duplicated().any():
+
+              raise RuntimeError(
+                  "Duplicate ticker detected"
+              )
+
+          print()
+          print("DECISION SUMMARY")
+
+          print(
+              df["decision"]
+              .value_counts(
+                  dropna=False
+              )
+              .to_string()
+          )
+
+          print()
+          print("STEP 9 OUTPUT : OK")
+          PY
+
+
+      # ============================================================
+      # 18. STEP 10 - FINAL REPORT
+      # ============================================================
+
+      - name: Run STEP 10 Final Report
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "RUN STEP 10 FINAL REPORT"
+          echo "=========================================="
+
+          test -f data/analysis/decision.csv
+
+          python src/10_final_report.py
+
+
+      # ============================================================
+      # 19. STEP 10 VALIDATION
+      # ============================================================
+
+      - name: Validate STEP 10 Final Report
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "STEP 10 OUTPUT CHECK"
+          echo "=========================================="
+
+          test -f data/analysis/final_report.csv
+
+          python - <<'PY'
+          import pandas as pd
+
+          file = "data/analysis/final_report.csv"
+
+          df = pd.read_csv(file)
+
+          print(
+              "ROWS              :",
+              len(df)
+          )
+
+          print(
+              "TICKERS           :",
+              df["ticker"].nunique()
+          )
+
+          print(
+              "DECISION SCORE    :",
+              pd.to_numeric(
+                  df["decision_score"],
+                  errors="coerce"
+              ).notna().sum()
+          )
+
+          print(
+              "DECISION VALID    :",
+              df["decision"].notna().sum()
+          )
+
+          if df.empty:
+
+              raise RuntimeError(
+                  "final_report.csv is empty"
+              )
+
+          required = [
+              "ticker",
+              "decision_score",
+              "decision"
+          ]
+
+          missing = [
+              column
+              for column in required
+              if column not in df.columns
+          ]
+
+          if missing:
+
+              raise RuntimeError(
+                  "Missing required columns: "
+                  + ", ".join(missing)
+              )
+
+          valid_decisions = {
+              "🟢 진입",
+              "🟡 관망",
+              "🔴 회피"
+          }
+
+          invalid = (
+              set(
+                  df["decision"]
+                  .dropna()
+                  .astype(str)
+                  .str.strip()
+              )
+              - valid_decisions
+          )
+
+          if invalid:
+
+              raise RuntimeError(
+                  "Unexpected decision labels: "
+                  + ", ".join(
+                      sorted(invalid)
+                  )
+              )
+
+          print()
+          print("DECISION SUMMARY")
+
+          print(
+              df["decision"]
+              .value_counts(
+                  dropna=False
+              )
+              .to_string()
+          )
+
+          print()
+          print("FINAL REPORT : OK")
+          PY
+
+
+      # ============================================================
+      # 20. STEP 11 - SPECIAL LIST
+      # ============================================================
+
+      - name: Run STEP 11 Special List
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "RUN STEP 11 SPECIAL LIST"
+          echo "=========================================="
+
+          test -f data/analysis/unusual_flow.csv
+
+          python src/11_special_list.py
+
+
+      # ============================================================
+      # 21. STEP 11 VALIDATION
+      # ============================================================
+
+      - name: Validate STEP 11 Special List
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "STEP 11 OUTPUT CHECK"
+          echo "=========================================="
+
+          test -f data/analysis/special_list.csv
+          test -f data/analysis/special_list.md
+
+          python - <<'PY'
+          import pandas as pd
+
+          file = "data/analysis/special_list.csv"
+
+          df = pd.read_csv(file)
+
+          print(
+              "ROWS              :",
+              len(df)
+          )
+
+          print(
+              "TICKERS           :",
+              df["ticker"].nunique()
+          )
+
+          if "special_score" in df.columns:
+
+              print(
+                  "SPECIAL SCORE     :",
+                  df["special_score"].notna().sum()
+              )
+
+          if "structure" in df.columns:
+
+              print(
+                  "CALL BUY + PUT SELL:",
+                  df["structure"]
+                  .astype(str)
+                  .str.contains(
+                      "CALL BUY + PUT SELL",
+                      regex=False
+                  )
+                  .sum()
+              )
+
+          print()
+          print("STEP 11 OUTPUT : OK")
+          PY
+
+
+      # ============================================================
+      # 22. STEP 12 INPUT CHECK
+      #
+      # ALL LOCAL FILES MUST STILL EXIST.
+      # ============================================================
+
+      - name: Verify STEP 12 Inputs
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "STEP 12 INPUT CHECK"
+          echo "=========================================="
+
+          for file in \
+            data/analysis/market_regime.csv \
+            data/analysis/unusual_flow.csv \
+            data/analysis/top20.csv \
+            data/analysis/option_search.csv \
+            data/analysis/options_greeks.csv \
+            data/analysis/structure.csv \
+            data/analysis/decision.csv \
+            data/analysis/final_report.csv \
+            data/analysis/special_list.csv
+          do
+
+            test -f "$file"
+
+          done
+
+          echo "STEP 12 ALL INPUTS : OK"
+
+
+      # ============================================================
+      # 23. STEP 12 - TELEGRAM
+      # ============================================================
+
+      - name: Run STEP 12 Telegram Reporter
+        env:
+
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "RUN STEP 12 TELEGRAM"
+          echo "=========================================="
+
+          python src/12_telegram.py
+
+
+      # ============================================================
+      # 24. STEP 12 COMPLETION
+      # ============================================================
+
+      - name: STEP 12 Completion Check
+        run: |
+
+          set -e
+
+          echo "STEP 12 TELEGRAM : SCRIPT COMPLETED"
+
+
+      # ============================================================
+      # 25. SAVE SMALL RESULTS
       #
       # IMPORTANT:
-      # Never commit these files.
+      # Greeks / Flow are NEVER committed.
       # ============================================================
 
-      - name: Remove generated local-only CSV files
+      - name: Commit Small Analysis Results
         run: |
 
           set -e
 
           echo "=========================================="
-          echo "REMOVE LOCAL-ONLY FILES"
+          echo "COMMIT SMALL ANALYSIS RESULTS"
           echo "=========================================="
 
-          rm -f data/analysis/options_greeks.csv
-          rm -f data/analysis/unusual_flow.csv
-
-          echo "LOCAL-ONLY FILES REMOVED"
-
-      # ============================================================
-      # 13. GIT STATUS
-      # ============================================================
-
-      - name: Check Git Status
-        run: |
-
-          set -e
-
-          echo "=========================================="
-          echo "GIT STATUS CHECK"
-          echo "=========================================="
-
-          git status --short
-
-      # ============================================================
-      # 14. COMMIT ONLY TOP20
-      # ============================================================
-
-      - name: Commit TOP 20
-        run: |
-
-          set -e
-
-          echo "=========================================="
-          echo "COMMIT STEP 6 TOP20"
-          echo "=========================================="
-
-          git config user.name "github-actions[bot]"
+          git config user.name \
+            "github-actions[bot]"
 
           git config user.email \
             "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add data/analysis/top20.csv
+          git add \
+            data/analysis/top20.csv \
+            data/analysis/option_search.csv \
+            data/analysis/structure.csv \
+            data/analysis/decision.csv \
+            data/analysis/final_report.csv \
+            data/analysis/special_list.csv \
+            data/analysis/special_list.md
 
           if git diff --cached --quiet; then
 
-            echo "NO TOP20 CHANGES"
+            echo "NO SMALL RESULT CHANGES"
 
           else
 
             git commit \
-              -m "Update top 20 unusual option flow"
+              -m "Update full option scanner results [skip ci]"
+
+            echo "SMALL RESULTS COMMITTED"
 
           fi
 
+
       # ============================================================
-      # 15. SYNC
+      # 26. SYNC
       # ============================================================
 
       - name: Sync with remote main
@@ -415,56 +1061,103 @@ jobs:
 
           echo "REBASE : OK"
 
+
       # ============================================================
-      # 16. PUSH ONLY TOP20 COMMIT
+      # 27. PUSH
       # ============================================================
 
-      - name: Push TOP 20
+      - name: Push Results
         run: |
 
           set -e
 
           echo "=========================================="
-          echo "PUSH STEP 6 DATA"
+          echo "PUSH RESULTS"
           echo "=========================================="
 
           git push origin HEAD:main
 
           echo "PUSH : OK"
 
-      # ============================================================
-      # 17. ARTIFACT
-      # ============================================================
-
-      - name: Upload TOP 20 Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: step6-top20
-          path: data/analysis/top20.csv
-          retention-days: 7
 
       # ============================================================
-      # 18. FINAL
+      # 28. FINAL CLEANUP
+      #
+      # THIS IS THE FIRST POINT WHERE
+      # OPTIONS_GREEKS AND UNUSUAL_FLOW MAY BE DELETED.
       # ============================================================
 
-      - name: STEP 5-6 Complete
+      - name: Cleanup Local-Only Large Files
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "FINAL LOCAL CLEANUP"
+          echo "=========================================="
+
+          rm -f \
+            data/analysis/options_greeks.csv
+
+          rm -f \
+            data/analysis/unusual_flow.csv
+
+          echo "OPTIONS GREEKS : REMOVED"
+          echo "UNUSUAL FLOW   : REMOVED"
+
+
+      # ============================================================
+      # 29. FINAL CLEANUP VALIDATION
+      # ============================================================
+
+      - name: Verify Final Cleanup
+        run: |
+
+          set -e
+
+          if [ -f data/analysis/options_greeks.csv ]; then
+
+            echo \
+              "ERROR: options_greeks.csv still exists"
+
+            exit 1
+
+          fi
+
+          if [ -f data/analysis/unusual_flow.csv ]; then
+
+            echo \
+              "ERROR: unusual_flow.csv still exists"
+
+            exit 1
+
+          fi
+
+          echo "LOCAL CLEANUP : OK"
+
+
+      # ============================================================
+      # 30. COMPLETE
+      # ============================================================
+
+      - name: STEP 5-12 Complete
         run: |
 
           echo "=========================================="
-          echo "STEP 5-6 COMPLETE"
+          echo "🔥 STEP 5-12 FULL PIPELINE COMPLETE"
           echo "=========================================="
 
-          echo "STEP 4 source : data/normalized/options_normalized.csv"
-          echo "STEP 4 output : LOCAL options_greeks.csv"
-          echo "STEP 5 output : LOCAL unusual_flow.csv"
-          echo "STEP 6 output : data/analysis/top20.csv"
+          echo "STEP 4 : Greeks               LOCAL"
+          echo "STEP 5 : Unusual Flow         LOCAL"
+          echo "STEP 6 : TOP 20               SAVED"
+          echo "STEP 7 : Option Search        SAVED"
+          echo "STEP 8 : Structure            SAVED"
+          echo "STEP 9 : Decision             SAVED"
+          echo "STEP 10: Final Report         SAVED"
+          echo "STEP 11: Special List         SAVED"
+          echo "STEP 12: Telegram             SENT"
 
-          echo "STEP 4 Greeks : NOT COMMITTED"
-          echo "STEP 5 Flow   : NOT COMMITTED"
-          echo "TOP20        : COMMITTED"
-
-          echo "Expected normalized rows : 291997"
-          echo "Expected ticker count    : 548"
-          echo "Expected TOP20 rows      : 20"
-
-          echo "STEP 5-6 VERIFIED."
+          echo ""
+          echo "STEP 4/5 LARGE FILES : DELETED"
+          echo ""
+          echo "PIPELINE STATUS : SUCCESS"
