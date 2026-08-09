@@ -58,9 +58,7 @@ def percentile_score(series):
 
     series = numeric(series)
 
-    valid = series.notna().sum()
-
-    if valid <= 1:
+    if series.notna().sum() <= 1:
 
         return pd.Series(
             0.5,
@@ -85,7 +83,7 @@ def main():
     log("START")
 
     # --------------------------------------------------------
-    # INPUT CHECK
+    # INPUT
     # --------------------------------------------------------
 
     if not os.path.exists(INPUT_FILE):
@@ -93,10 +91,6 @@ def main():
         raise FileNotFoundError(
             f"Input file not found: {INPUT_FILE}"
         )
-
-    log(
-        f"INPUT : {INPUT_FILE}"
-    )
 
     df = pd.read_csv(
         INPUT_FILE
@@ -117,7 +111,7 @@ def main():
     )
 
     # --------------------------------------------------------
-    # REQUIRED COLUMNS
+    # REQUIRED
     # --------------------------------------------------------
 
     required_columns = [
@@ -151,7 +145,7 @@ def main():
         )
 
     # --------------------------------------------------------
-    # NUMERIC CONVERSION
+    # NUMERIC
     # --------------------------------------------------------
 
     numeric_columns = [
@@ -171,7 +165,7 @@ def main():
         )
 
     # --------------------------------------------------------
-    # NORMALIZE SYMBOL
+    # SYMBOL
     # --------------------------------------------------------
 
     df["symbol"] = (
@@ -182,11 +176,11 @@ def main():
     )
 
     # --------------------------------------------------------
-    # BUILD SYMBOL LEVEL FLOW
+    # SYMBOL LEVEL
     # --------------------------------------------------------
 
     log(
-        "BUILDING SYMBOL LEVEL FLOW"
+        "ANALYZING ALL SYMBOLS"
     )
 
     grouped = []
@@ -199,21 +193,19 @@ def main():
         if not symbol or symbol == "NAN":
             continue
 
-        # ----------------------------------------------------
-        # TOTALS
-        # ----------------------------------------------------
+        total_volume = (
+            group["volume"]
+            .fillna(0)
+            .sum()
+        )
 
-        total_volume = group[
-            "volume"
-        ].fillna(0).sum()
-
-        total_premium = group[
-            "estimated_traded_premium"
-        ].fillna(0).sum()
-
-        # ----------------------------------------------------
-        # CALL / PUT
-        # ----------------------------------------------------
+        total_premium = (
+            group[
+                "estimated_traded_premium"
+            ]
+            .fillna(0)
+            .sum()
+        )
 
         call_group = group[
             group["option_type"]
@@ -231,17 +223,21 @@ def main():
             == "PUT"
         ]
 
-        call_premium = call_group[
-            "estimated_traded_premium"
-        ].fillna(0).sum()
+        call_premium = (
+            call_group[
+                "estimated_traded_premium"
+            ]
+            .fillna(0)
+            .sum()
+        )
 
-        put_premium = put_group[
-            "estimated_traded_premium"
-        ].fillna(0).sum()
-
-        # ----------------------------------------------------
-        # CALL / PUT IMBALANCE
-        # ----------------------------------------------------
+        put_premium = (
+            put_group[
+                "estimated_traded_premium"
+            ]
+            .fillna(0)
+            .sum()
+        )
 
         cp_total = (
             call_premium
@@ -260,29 +256,7 @@ def main():
             cp_imbalance = 0.0
 
         # ----------------------------------------------------
-        # FLOW DIRECTION
-        # ----------------------------------------------------
-
-        if cp_imbalance >= 0.25:
-
-            flow_direction = (
-                "CALL DOMINANT"
-            )
-
-        elif cp_imbalance <= -0.25:
-
-            flow_direction = (
-                "PUT DOMINANT"
-            )
-
-        else:
-
-            flow_direction = (
-                "BALANCED"
-            )
-
-        # ----------------------------------------------------
-        # BUY / SELL ESTIMATE
+        # BUY / SELL
         # ----------------------------------------------------
 
         buy_group = group[
@@ -299,13 +273,21 @@ def main():
             == "SELL EST."
         ]
 
-        buy_premium = buy_group[
-            "estimated_traded_premium"
-        ].fillna(0).sum()
+        buy_premium = (
+            buy_group[
+                "estimated_traded_premium"
+            ]
+            .fillna(0)
+            .sum()
+        )
 
-        sell_premium = sell_group[
-            "estimated_traded_premium"
-        ].fillna(0).sum()
+        sell_premium = (
+            sell_group[
+                "estimated_traded_premium"
+            ]
+            .fillna(0)
+            .sum()
+        )
 
         directional_total = (
             buy_premium
@@ -385,13 +367,13 @@ def main():
         # FLOW SCORE
         # ----------------------------------------------------
 
-        max_flow_score = group[
-            "flow_score"
-        ].max()
+        max_flow_score = (
+            group["flow_score"].max()
+        )
 
-        avg_flow_score = group[
-            "flow_score"
-        ].mean()
+        avg_flow_score = (
+            group["flow_score"].mean()
+        )
 
         if pd.isna(max_flow_score):
             max_flow_score = 0.0
@@ -422,35 +404,7 @@ def main():
                 .iloc[0]
             )
 
-        top_dte = top_option[
-            "DTE"
-        ]
-
-        # ----------------------------------------------------
-        # TOP CALLS
-        # ----------------------------------------------------
-
-        top_calls = (
-            call_group
-            .sort_values(
-                "flow_score",
-                ascending=False
-            )
-            .head(3)
-        )
-
-        # ----------------------------------------------------
-        # TOP PUTS
-        # ----------------------------------------------------
-
-        top_puts = (
-            put_group
-            .sort_values(
-                "flow_score",
-                ascending=False
-            )
-            .head(3)
-        )
+        top_dte = top_option["DTE"]
 
         # ----------------------------------------------------
         # OPTION TEXT
@@ -482,26 +436,23 @@ def main():
                 errors="coerce"
             )
 
-            if pd.isna(strike):
-                strike_text = "N/A"
-            else:
-                strike_text = (
-                    f"${strike:.2f}"
-                )
+            strike_text = (
+                "N/A"
+                if pd.isna(strike)
+                else f"${strike:.2f}"
+            )
 
-            if pd.isna(dte):
-                dte_text = "N/A"
-            else:
-                dte_text = str(
-                    int(dte)
-                )
+            dte_text = (
+                "N/A"
+                if pd.isna(dte)
+                else str(int(dte))
+            )
 
-            if pd.isna(score):
-                score_text = "N/A"
-            else:
-                score_text = (
-                    f"{score:.1f}"
-                )
+            score_text = (
+                "N/A"
+                if pd.isna(score)
+                else f"{score:.1f}"
+            )
 
             return (
                 f"{str(row['option_type']).upper()} "
@@ -510,26 +461,60 @@ def main():
                 f"Score {score_text}"
             )
 
+        top_calls = (
+            call_group
+            .sort_values(
+                "flow_score",
+                ascending=False
+            )
+            .head(3)
+        )
+
+        top_puts = (
+            put_group
+            .sort_values(
+                "flow_score",
+                ascending=False
+            )
+            .head(3)
+        )
+
         top_call_text = " / ".join(
-
             option_text(row)
-
             for _, row
             in top_calls.iterrows()
-
         )
 
         top_put_text = " / ".join(
-
             option_text(row)
-
             for _, row
             in top_puts.iterrows()
-
         )
 
         # ----------------------------------------------------
-        # SELECTION REASON
+        # FLOW DIRECTION
+        # ----------------------------------------------------
+
+        if cp_imbalance >= 0.25:
+
+            flow_direction = (
+                "CALL DOMINANT"
+            )
+
+        elif cp_imbalance <= -0.25:
+
+            flow_direction = (
+                "PUT DOMINANT"
+            )
+
+        else:
+
+            flow_direction = (
+                "BALANCED"
+            )
+
+        # ----------------------------------------------------
+        # REASON
         # ----------------------------------------------------
 
         reasons = []
@@ -598,19 +583,11 @@ def main():
             reasons[:5]
         )
 
-        # ----------------------------------------------------
-        # APPEND
-        # ----------------------------------------------------
-
         grouped.append(
-
             {
+                "symbol": symbol,
 
-                "symbol":
-                    symbol,
-
-                "option_count":
-                    len(group),
+                "option_count": len(group),
 
                 "total_volume":
                     total_volume,
@@ -665,14 +642,8 @@ def main():
 
                 "selection_reason":
                     selection_reason,
-
             }
-
         )
-
-    # --------------------------------------------------------
-    # SYMBOL DATAFRAME
-    # --------------------------------------------------------
 
     result = pd.DataFrame(
         grouped
@@ -685,7 +656,7 @@ def main():
         )
 
     log(
-        f"SYMBOLS GENERATED : {len(result):,}"
+        f"SYMBOLS ANALYZED : {len(result):,}"
     )
 
     # --------------------------------------------------------
@@ -695,59 +666,44 @@ def main():
     result[
         "premium_score"
     ] = percentile_score(
-
         np.log1p(
             result[
                 "total_premium"
-            ].clip(
-                lower=0
-            )
+            ].clip(lower=0)
         )
-
     )
 
     result[
         "volume_score"
     ] = percentile_score(
-
         np.log1p(
             result[
                 "total_volume"
-            ].clip(
-                lower=0
-            )
+            ].clip(lower=0)
         )
-
     )
 
     result[
         "flow_score_score"
     ] = percentile_score(
-
         result[
             "max_flow_score"
         ]
-
     )
 
     result[
         "volume_oi_score"
     ] = percentile_score(
-
         np.log1p(
             result[
                 "max_volume_oi"
-            ].clip(
-                lower=0
-            )
+            ].clip(lower=0)
         )
-
     )
 
     result[
         "imbalance_score"
     ] = (
-
         result[
             "call_put_imbalance"
         ]
@@ -756,11 +712,10 @@ def main():
             lower=0,
             upper=1
         )
-
     )
 
     # --------------------------------------------------------
-    # FINAL TOP20 SCORE
+    # TOP 20 SCORE
     # --------------------------------------------------------
 
     result[
@@ -771,30 +726,21 @@ def main():
             "premium_score"
         ] * 35
 
-        +
-
-        result[
+        + result[
             "volume_score"
         ] * 15
 
-        +
-
-        result[
+        + result[
             "flow_score_score"
         ] * 30
 
-        +
-
-        result[
+        + result[
             "volume_oi_score"
         ] * 10
 
-        +
-
-        result[
+        + result[
             "imbalance_score"
         ] * 10
-
     )
 
     # --------------------------------------------------------
@@ -804,19 +750,14 @@ def main():
     result = (
         result
         .sort_values(
-
             [
                 "top20_score",
                 "max_flow_score",
                 "total_premium",
             ],
-
             ascending=False
-
         )
-        .reset_index(
-            drop=True
-        )
+        .reset_index(drop=True)
     )
 
     # --------------------------------------------------------
@@ -830,8 +771,7 @@ def main():
     if len(top20) < TOP_N:
 
         raise RuntimeError(
-            f"Only {len(top20)} symbols available. "
-            f"Cannot build TOP {TOP_N}."
+            f"Only {len(top20)} symbols available."
         )
 
     top20[
@@ -842,7 +782,7 @@ def main():
     )
 
     # --------------------------------------------------------
-    # FINAL COLUMN ORDER
+    # FINAL COLUMNS
     # --------------------------------------------------------
 
     columns = [
@@ -850,6 +790,7 @@ def main():
         "rank",
         "symbol",
         "top20_score",
+
         "max_flow_score",
         "avg_flow_score",
 
@@ -877,7 +818,6 @@ def main():
         "top_put_options",
 
         "selection_reason",
-
     ]
 
     top20 = top20[
@@ -903,59 +843,34 @@ def main():
     # --------------------------------------------------------
 
     print()
+    print("=" * 72)
+    print("🔎 STEP 6 VALIDATION")
+    print("=" * 72)
 
     print(
-        "=" * 72
+        f"INPUT ROWS       : {input_rows:,}"
     )
 
     print(
-        "🔎 STEP 6 VALIDATION"
+        f"INPUT TICKERS    : {input_tickers:,}"
     )
 
     print(
-        "=" * 72
+        f"SYMBOLS ANALYZED : {len(result):,}"
     )
 
     print(
-        f"INPUT ROWS       : "
-        f"{input_rows:,}"
+        f"TOP20 ROWS       : {len(top20):,}"
     )
 
     print(
-        f"INPUT TICKERS    : "
-        f"{input_tickers:,}"
+        f"OUTPUT FILE      : {OUTPUT_FILE}"
     )
 
-    print(
-        f"SYMBOLS ANALYZED : "
-        f"{len(result):,}"
-    )
+    print("=" * 72)
 
-    print(
-        f"TOP20 ROWS       : "
-        f"{len(top20):,}"
-    )
-
-    print(
-        f"OUTPUT FILE      : "
-        f"{OUTPUT_FILE}"
-    )
-
-    print(
-        "=" * 72
-    )
-
-    # --------------------------------------------------------
-    # TOP 20 DISPLAY
-    # --------------------------------------------------------
-
-    print(
-        "🔥 TOP 20 UNUSUAL OPTION FLOW"
-    )
-
-    print(
-        "=" * 72
-    )
+    print("🔥 TOP 20 UNUSUAL OPTION FLOW")
+    print("=" * 72)
 
     display_columns = [
 
@@ -971,40 +886,27 @@ def main():
     ]
 
     print(
-
         top20[
             display_columns
         ].to_string(
             index=False
         )
-
     )
 
-    print(
-        "=" * 72
-    )
+    print("=" * 72)
 
-    print(
-        "📌 SELECTION REASONS"
-    )
-
-    print(
-        "=" * 72
-    )
+    print("📌 SELECTION REASONS")
+    print("=" * 72)
 
     for _, row in top20.iterrows():
 
         print(
-
             f"{int(row['rank']):02d}. "
             f"{row['symbol']} → "
             f"{row['selection_reason']}"
-
         )
 
-    print(
-        "=" * 72
-    )
+    print("=" * 72)
 
     # --------------------------------------------------------
     # FINAL CHECKS
@@ -1038,9 +940,7 @@ def main():
         "TOP20 CHECK      : OK"
     )
 
-    print(
-        "=" * 72
-    )
+    print("=" * 72)
 
     log(
         "STEP 6 TOP20 COMPLETE"
