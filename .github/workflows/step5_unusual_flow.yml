@@ -1,3 +1,4 @@
+```yaml
 name: STEP 5 - Unusual Option Flow
 
 on:
@@ -12,7 +13,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -28,18 +28,40 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Check Normalized Data
+        run: |
+          echo "=========================================="
+          echo "STEP 3 INPUT CHECK"
+          echo "=========================================="
+
+          ls -lh data/normalized/
+
+          python -c "import pandas as pd; df=pd.read_csv('data/normalized/options_normalized.csv'); print('ROWS       :', len(df)); print('COLUMNS    :', len(df.columns)); print('TICKERS    :', df['symbol'].nunique()); print('DTE MIN    :', df['DTE'].min()); print('DTE MAX    :', df['DTE'].max())"
+
+      - name: Run Greeks Engine
+        run: |
+          echo "=========================================="
+          echo "RUN STEP 4 GREEKS"
+          echo "=========================================="
+
+          python src/04_greeks.py
+
       - name: Check Greeks Data
         run: |
           echo "=========================================="
           echo "STEP 4 INPUT CHECK"
           echo "=========================================="
 
-          ls -lh data/analysis/
+          ls -lh data/analysis/options_greeks.csv
 
-          python -c "import pandas as pd; df=pd.read_csv('data/analysis/options_greeks.csv'); print('ROWS       :', len(df)); print('COLUMNS    :', len(df.columns)); print('TICKERS    :', df['symbol'].nunique()); print('DTE MIN    :', df['DTE'].min()); print('DTE MAX    :', df['DTE'].max())"
+          python -c "import pandas as pd; df=pd.read_csv('data/analysis/options_greeks.csv'); print('ROWS       :', len(df)); print('COLUMNS    :', len(df.columns)); print('TICKERS    :', df['symbol'].nunique()); print('DTE MIN    :', df['DTE'].min()); print('DTE MAX    :', df['DTE'].max()); print('VALID DELTA:', df['delta'].notna().sum()); print('VALID GAMMA:', df['gamma'].notna().sum()); print('VALID VEGA :', df['vega'].notna().sum())"
 
       - name: Run Unusual Flow Engine
         run: |
+          echo "=========================================="
+          echo "RUN STEP 5 UNUSUAL FLOW"
+          echo "=========================================="
+
           python src/05_unusual_flow.py
 
       - name: Check Unusual Flow Output
@@ -87,3 +109,4 @@ jobs:
         with:
           name: unusual-flow-data
           path: data/analysis/unusual_flow.csv
+```
