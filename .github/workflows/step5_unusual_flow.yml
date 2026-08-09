@@ -284,7 +284,7 @@ jobs:
           git status --short
 
       # ============================================================
-      # 12. COMMIT STEP 5 OUTPUT
+      # 12. COMMIT STEP 5 DATA
       # ============================================================
 
       - name: Commit Step 5 Data
@@ -299,12 +299,25 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+          # STEP 5 output
           git add data/analysis/unusual_flow.csv
+
+          # .gitignore update
+          git add .gitignore
+
+          # Record deletion of previously tracked Greeks file
+          git add -u data/analysis/options_greeks.csv
+
+          echo "=========================================="
+          echo "STAGED CHANGES"
+          echo "=========================================="
+
+          git status --short
 
           if git diff --cached --quiet; then
             echo "NO CHANGES TO COMMIT"
           else
-            git commit -m "Update unusual option flow analysis"
+            git commit -m "Update STEP 5 unusual flow and remove local Greeks"
             echo "STEP 5 COMMIT CREATED"
           fi
 
