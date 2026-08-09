@@ -1,3 +1,4 @@
+```yaml
 name: STEP 4 - Greeks Engine
 
 on:
@@ -10,6 +11,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -43,21 +46,32 @@ jobs:
 
           ls -lh data/analysis/
 
-          python -c "import pandas as pd; df=pd.read_csv('data/analysis/options_greeks.csv'); print('ROWS       :', len(df)); print('COLUMNS    :', len(df.columns)); print('VALID DELTA:', df['delta'].notna().sum()); print('VALID GAMMA:', df['gamma'].notna().sum()); print('VALID VEGA :', df['vega'].notna().sum())"
+          python -c "import pandas as pd; df=pd.read_csv('data/analysis/options_greeks.csv'); print('ROWS       :', len(df)); print('COLUMNS    :', len(df.columns)); print('TICKERS    :', df['symbol'].nunique()); print('VALID DELTA:', df['delta'].notna().sum()); print('VALID GAMMA:', df['gamma'].notna().sum()); print('VALID VEGA :', df['vega'].notna().sum())"
 
-      - name: Save Greeks Data To Repository
+      - name: Verify Greeks File Size
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          echo "=========================================="
+          echo "STEP 4 FILE SIZE CHECK"
+          echo "=========================================="
 
-          git add data/analysis/options_greeks.csv
+          ls -lh data/analysis/options_greeks.csv
 
-          git diff --cached --quiet || git commit -m "Add calculated option Greeks"
+          FILE_SIZE=$(stat -c%s data/analysis/options_greeks.csv)
 
-          git push
+          echo "GREEKS FILE SIZE : ${FILE_SIZE} bytes"
 
-      - name: Upload Greeks Data
-        uses: actions/upload-artifact@v4
-        with:
-          name: option-greeks-data
-          path: data/analysis/options_greeks.csv
+          if [ "$FILE_SIZE" -ge 104857600 ]; then
+            echo "WARNING: options_greeks.csv exceeds GitHub 100 MB file limit."
+            echo "The file will NOT be committed to the repository."
+          else
+            echo "GREEKS FILE SIZE : UNDER 100 MB"
+          fi
+
+      - name: STEP 4 Complete
+        run: |
+          echo "=========================================="
+          echo "STEP 4 COMPLETE"
+          echo "=========================================="
+          echo "Greeks calculation completed successfully."
+          echo "options_greeks.csv will not be committed to GitHub."
+```
