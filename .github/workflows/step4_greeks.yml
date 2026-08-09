@@ -1,4 +1,3 @@
-```yaml
 name: STEP 4 - Greeks Engine
 
 on:
@@ -74,4 +73,4 @@ jobs:
           echo "=========================================="
           echo "Greeks calculation completed successfully."
           echo "options_greeks.csv will not be committed to GitHub."
-```
+
