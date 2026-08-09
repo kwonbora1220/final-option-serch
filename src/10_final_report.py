@@ -1,13 +1,10 @@
+from __future__ import annotations
+
 import os
 from datetime import datetime, timezone
 
-import numpy as np
 import pandas as pd
 
-
-# ============================================================
-# CONFIG
-# ============================================================
 
 BASE_DIR = os.path.dirname(
     os.path.dirname(
@@ -18,43 +15,34 @@ BASE_DIR = os.path.dirname(
 ANALYSIS_DIR = os.path.join(
     BASE_DIR,
     "data",
-    "analysis"
+    "analysis",
 )
 
 TOP20_FILE = os.path.join(
     ANALYSIS_DIR,
-    "top20.csv"
-)
-
-FLOW_FILE = os.path.join(
-    ANALYSIS_DIR,
-    "unusual_flow.csv"
-)
-
-SEARCH_FILE = os.path.join(
-    ANALYSIS_DIR,
-    "option_search.csv"
-)
-
-STRUCTURE_FILE = os.path.join(
-    ANALYSIS_DIR,
-    "structure.csv"
+    "top20.csv",
 )
 
 DECISION_FILE = os.path.join(
     ANALYSIS_DIR,
-    "decision.csv"
+    "decision.csv",
+)
+
+SEARCH_FILE = os.path.join(
+    ANALYSIS_DIR,
+    "option_search.csv",
+)
+
+STRUCTURE_FILE = os.path.join(
+    ANALYSIS_DIR,
+    "structure.csv",
 )
 
 OUTPUT_FILE = os.path.join(
     ANALYSIS_DIR,
-    "final_report.csv"
+    "final_report.csv",
 )
 
-
-# ============================================================
-# LOG
-# ============================================================
 
 def log(message):
 
@@ -69,381 +57,301 @@ def log(message):
     )
 
 
-# ============================================================
-# HELPERS
-# ============================================================
+def ticker_column(df):
 
-def find_column(df, candidates):
+    for column in [
+        "ticker",
+        "symbol",
+        "underlying",
+        "underlying_symbol",
+    ]:
 
-    normalized = {
-        str(col)
-        .strip()
-        .lower()
-        .replace(" ", "_")
-        .replace("-", "_"): col
-        for col in df.columns
-    }
+        if column in df.columns:
+            return column
 
-    for candidate in candidates:
-
-        key = (
-            candidate
-            .strip()
-            .lower()
-            .replace(" ", "_")
-            .replace("-", "_")
-        )
-
-        if key in normalized:
-            return normalized[key]
-
-    return None
-
-
-def load(path, name):
-
-    if not os.path.exists(path):
-
-        raise FileNotFoundError(
-            f"{name} not found: {path}"
-        )
-
-    df = pd.read_csv(path)
-
-    log(
-        f"{name} ROWS : {len(df):,}"
+    raise RuntimeError(
+        "Ticker column not found"
     )
-
-    return df
 
 
 def normalize(df):
 
-    ticker_col = find_column(
-        df,
-        [
-            "ticker",
-            "symbol",
-            "underlying",
-            "underlying_symbol"
-        ]
-    )
+    column = ticker_column(df)
 
-    if ticker_col is None:
+    df = df.copy()
 
-        raise ValueError(
-            "Ticker column not found"
-        )
-
-    result = df.copy()
-
-    result["_ticker"] = (
-        result[ticker_col]
+    df["ticker"] = (
+        df[column]
         .astype(str)
         .str.upper()
         .str.strip()
     )
 
-    return result
+    return df
 
-
-# ============================================================
-# MAIN
-# ============================================================
 
 def main():
 
     log("START")
 
     top20 = normalize(
-        load(
-            TOP20_FILE,
-            "TOP20"
-        )
-    )
-
-    flow = normalize(
-        load(
-            FLOW_FILE,
-            "UNUSUAL FLOW"
-        )
-    )
-
-    search = normalize(
-        load(
-            SEARCH_FILE,
-            "OPTION SEARCH"
-        )
-    )
-
-    structure = normalize(
-        load(
-            STRUCTURE_FILE,
-            "STRUCTURE"
-        )
+        pd.read_csv(TOP20_FILE)
     )
 
     decision = normalize(
-        load(
-            DECISION_FILE,
-            "DECISION"
-        )
+        pd.read_csv(DECISION_FILE)
     )
 
-    # --------------------------------------------------------
-    # TOP20
-    # --------------------------------------------------------
-
-    top_tickers = (
-        top20["_ticker"]
-        .drop_duplicates()
-        .tolist()
+    search = normalize(
+        pd.read_csv(SEARCH_FILE)
     )
 
-    # --------------------------------------------------------
-    # LOOKUPS
-    # --------------------------------------------------------
+    structure = normalize(
+        pd.read_csv(STRUCTURE_FILE)
+    )
 
-    top20_lookup = (
+    top20 = (
         top20
-        .drop_duplicates("_ticker")
-        .set_index("_ticker")
+        .drop_duplicates("ticker")
+        .head(20)
+        .reset_index(drop=True)
     )
 
-    flow_lookup = (
-        flow
-        .drop_duplicates("_ticker")
-        .set_index("_ticker")
-    )
-
-    search_lookup = (
-        search
-        .drop_duplicates("_ticker")
-        .set_index("_ticker")
-    )
-
-    structure_lookup = (
-        structure
-        .drop_duplicates("_ticker")
-        .set_index("_ticker")
-    )
-
-    decision_lookup = (
+    decision = (
         decision
-        .drop_duplicates("_ticker")
-        .set_index("_ticker")
+        .drop_duplicates("ticker")
     )
 
-    # --------------------------------------------------------
-    # OUTPUT
-    # --------------------------------------------------------
+    search = (
+        search
+        .drop_duplicates("ticker")
+    )
+
+    structure = (
+        structure
+        .drop_duplicates("ticker")
+    )
+
+    if len(top20) != 20:
+        raise RuntimeError(
+            "TOP20 does not contain exactly 20 tickers"
+        )
 
     rows = []
 
-    for position, ticker in enumerate(
-        top_tickers,
-        start=1
+    for rank, ticker in enumerate(
+        top20["ticker"],
+        start=1,
     ):
 
         row = {
-
-            "rank":
-                position,
-
-            "ticker":
-                ticker
-
+            "rank": rank,
+            "ticker": ticker,
         }
 
-        # ----------------------------------------------------
-        # TOP20
-        # ----------------------------------------------------
+        d = decision[
+            decision["ticker"] == ticker
+        ]
 
-        if ticker in top20_lookup.index:
+        s = search[
+            search["ticker"] == ticker
+        ]
 
-            source = top20_lookup.loc[
-                ticker
-            ]
+        st = structure[
+            structure["ticker"] == ticker
+        ]
 
-            for field in [
-                "rank",
-                "score",
-                "flow_score",
-                "selection_reason",
-                "reason"
-            ]:
+        if d.empty:
+            raise RuntimeError(
+                f"Missing decision: {ticker}"
+            )
 
-                if field in source.index:
+        if st.empty:
+            raise RuntimeError(
+                f"Missing structure: {ticker}"
+            )
 
-                    row[
-                        f"top20_{field}"
-                    ] = source[field]
+        decision_row = d.iloc[0]
+        structure_row = st.iloc[0]
 
-        # ----------------------------------------------------
-        # FLOW
-        # ----------------------------------------------------
-
-        if ticker in flow_lookup.index:
-
-            source = flow_lookup.loc[
-                ticker
-            ]
-
-            for field in [
-                "flow_score",
-                "premium",
-                "estimated_premium",
-                "call_premium",
-                "put_premium"
-            ]:
-
-                if field in source.index:
-
-                    row[field] = source[field]
-
-        # ----------------------------------------------------
-        # OPTION SEARCH
-        # ----------------------------------------------------
-
-        if ticker in search_lookup.index:
-
-            source = search_lookup.loc[
-                ticker
-            ]
-
-            for field in [
-                "option_search_score",
-                "search_score",
-                "signal",
-                "option_signal",
-                "risk_reversal",
-                "strike",
-                "expiration",
-                "option_type",
-                "premium"
-            ]:
-
-                if field in source.index:
-
-                    row[field] = source[field]
-
-        # ----------------------------------------------------
-        # STRUCTURE
-        # ----------------------------------------------------
-
-        if ticker in structure_lookup.index:
-
-            source = structure_lookup.loc[
-                ticker
-            ]
-
-            for field in [
-                "current_price",
-                "call_wall",
-                "put_wall",
-                "support",
-                "resistance",
-                "call_gex",
-                "put_gex",
-                "net_gex",
-                "structure"
-            ]:
-
-                if field in source.index:
-
-                    row[field] = source[field]
-
-        # ----------------------------------------------------
+        # -----------------------------------------------------
         # DECISION
-        # ----------------------------------------------------
+        # -----------------------------------------------------
 
-        if ticker in decision_lookup.index:
+        for column in [
+            "market_score",
+            "market_regime",
+            "ndx_direction",
+            "spy_direction",
+            "soxx_direction",
+            "dia_direction",
+            "flow_score",
+            "direction_score",
+            "structure_score",
+            "price_score",
+            "index_score",
+            "decision_score",
+            "decision",
+            "reason",
+        ]:
 
-            source = decision_lookup.loc[
-                ticker
-            ]
+            if column in decision_row.index:
+                row[column] = decision_row[column]
 
-            for field in [
-                "market_score",
-                "market_regime",
-                "flow_score",
-                "option_search_score",
-                "option_signal",
-                "special_structure",
-                "special_score",
-                "decision_score",
-                "decision",
-                "reason"
+        # -----------------------------------------------------
+        # STRUCTURE
+        # -----------------------------------------------------
+
+        for column in [
+            "current_price",
+            "call_wall",
+            "put_wall",
+            "support",
+            "resistance",
+            "call_gex",
+            "put_gex",
+            "net_gex",
+            "structure",
+            "price_location",
+            "gex_structure",
+            "wall_structure",
+        ]:
+
+            if column in structure_row.index:
+                row[column] = structure_row[column]
+
+        # -----------------------------------------------------
+        # OPTION SEARCH
+        # -----------------------------------------------------
+
+        if not s.empty:
+
+            search_row = s.iloc[0]
+
+            for column in [
+                "risk_reversal",
+                "rr_score",
+                "rr_call_strike",
+                "rr_call_dte",
+                "rr_call_premium",
+                "rr_put_strike",
+                "rr_put_dte",
+                "rr_put_premium",
             ]:
 
-                if field in source.index:
+                if column in search_row.index:
+                    row[column] = search_row[column]
 
-                    row[field] = source[field]
-
-        # ----------------------------------------------------
+        # -----------------------------------------------------
         # FINAL DECISION
-        #
-        # STEP 9의 결과를 그대로 사용
-        # ----------------------------------------------------
+        # -----------------------------------------------------
 
-        row["final_decision"] = row.get(
-            "decision",
-            "UNKNOWN"
+        decision_value = (
+            str(
+                row.get(
+                    "decision",
+                    "",
+                )
+            )
+            .strip()
+        )
+
+        if decision_value not in {
+            "🟢 진입",
+            "🟡 관망",
+            "🔴 회피",
+        }:
+
+            raise RuntimeError(
+                f"Invalid decision for "
+                f"{ticker}: {decision_value}"
+            )
+
+        row["final_decision"] = (
+            decision_value
         )
 
         rows.append(row)
 
-        log(
-            f"{ticker} | "
-            f"{row['final_decision']}"
-        )
+    output = pd.DataFrame(rows)
 
-    output = pd.DataFrame(
-        rows
+    # ---------------------------------------------------------
+    # SORT
+    # ---------------------------------------------------------
+
+    output = output.sort_values(
+        "decision_score",
+        ascending=False,
+    ).reset_index(
+        drop=True
     )
 
-    if output.empty:
+    output["rank"] = (
+        range(
+            1,
+            len(output) + 1,
+        )
+    )
 
-        raise ValueError(
-            "Final report is empty"
+    # ---------------------------------------------------------
+    # VALIDATION
+    # ---------------------------------------------------------
+
+    if len(output) != 20:
+        raise RuntimeError(
+            "FINAL REPORT must contain 20 rows"
+        )
+
+    if output["ticker"].nunique() != 20:
+        raise RuntimeError(
+            "FINAL REPORT contains duplicate tickers"
+        )
+
+    if output[
+        "decision_score"
+    ].isna().any():
+        raise RuntimeError(
+            "FINAL REPORT contains NaN decision score"
+        )
+
+    if (
+        (
+            output["decision_score"]
+            < 0
+        )
+        |
+        (
+            output["decision_score"]
+            > 100
+        )
+    ).any():
+
+        raise RuntimeError(
+            "FINAL REPORT score outside 0-100"
         )
 
     output.to_csv(
         OUTPUT_FILE,
-        index=False
-    )
-
-    # ========================================================
-    # VALIDATION
-    # ========================================================
-
-    print()
-    print("=" * 72)
-    print("🔎 STEP 10 VALIDATION")
-    print("=" * 72)
-
-    print(
-        f"TOP TICKERS       : {len(top_tickers)}"
-    )
-
-    print(
-        f"OUTPUT ROWS       : {len(output)}"
-    )
-
-    print(
-        f"OUTPUT TICKERS    : "
-        f"{output['ticker'].nunique()}"
-    )
-
-    print(
-        f"FINAL DECISIONS   : "
-        f"{output['final_decision'].notna().sum()}"
+        index=False,
     )
 
     print()
-    print("FINAL DECISION COUNTS")
-    print("----------------------------------------")
+    print("STEP 10 FINAL REPORT")
+    print("=" * 72)
 
+    print(
+        output[
+            [
+                "rank",
+                "ticker",
+                "decision_score",
+                "final_decision",
+            ]
+        ].to_string(index=False)
+    )
+
+    print()
+    print("DECISION SUMMARY")
     print(
         output[
             "final_decision"
@@ -452,11 +360,29 @@ def main():
 
     print()
     print(
-        "OUTPUT FILE : "
-        "data/analysis/final_report.csv"
+        "ROWS              :",
+        len(output),
     )
 
-    print("=" * 72)
+    print(
+        "TICKERS           :",
+        output["ticker"].nunique(),
+    )
+
+    print(
+        "DECISION SCORE    :",
+        output["decision_score"].notna().sum(),
+    )
+
+    print(
+        "DECISION VALID    :",
+        output["final_decision"].notna().sum(),
+    )
+
+    print()
+    print(
+        "FINAL REPORT : OK"
+    )
 
     log(
         "STEP 10 FINAL REPORT COMPLETE"
