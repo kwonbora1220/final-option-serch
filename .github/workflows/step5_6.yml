@@ -1,0 +1,470 @@
+name: STEP 5-6 - Unusual Flow and Top 20
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: option-scanner-step5-6
+  cancel-in-progress: false
+
+jobs:
+
+  unusual-and-top20:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # ============================================================
+      # 1. CHECKOUT
+      # ============================================================
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ============================================================
+      # 2. PYTHON
+      # ============================================================
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # ============================================================
+      # 3. DEPENDENCIES
+      # ============================================================
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # ============================================================
+      # 4. CHECK NORMALIZED DATA
+      # ============================================================
+
+      - name: STEP 3 Input Check
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "STEP 3 INPUT CHECK"
+          echo "=========================================="
+
+          test -f data/normalized/options_normalized.csv
+
+          python - <<'PY'
+          import pandas as pd
+
+          file = "data/normalized/options_normalized.csv"
+
+          df = pd.read_csv(file)
+
+          print("ROWS       :", len(df))
+          print("COLUMNS    :", len(df.columns))
+          print("TICKERS    :", df["symbol"].nunique())
+          print("DTE MIN    :", df["DTE"].min())
+          print("DTE MAX    :", df["DTE"].max())
+
+          if len(df) < 100000:
+              raise RuntimeError(
+                  f"Normalized dataset too small: {len(df)}"
+              )
+
+          if df["symbol"].nunique() < 500:
+              raise RuntimeError(
+                  f"Option universe too small: "
+                  f"{df['symbol'].nunique()}"
+              )
+
+          print("NORMALIZED DATA : OK")
+          PY
+
+      # ============================================================
+      # 5. REMOVE LOCAL OLD GREEKS
+      #
+      # IMPORTANT:
+      # This file must NEVER be committed.
+      # ============================================================
+
+      - name: Remove old local Greeks
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "REMOVE OLD LOCAL GREEKS"
+          echo "=========================================="
+
+          rm -f data/analysis/options_greeks.csv
+
+          echo "OLD LOCAL GREEKS REMOVED"
+
+      # ============================================================
+      # 6. STEP 4 - REBUILD CURRENT GREEKS
+      # ============================================================
+
+      - name: Rebuild Current STEP 4 Greeks
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "REBUILD CURRENT STEP 4 GREEKS"
+          echo "=========================================="
+
+          python src/04_greeks.py
+
+      # ============================================================
+      # 7. STEP 4 VALIDATION
+      # ============================================================
+
+      - name: Validate STEP 4 Greeks
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "STEP 4 OUTPUT CHECK"
+          echo "=========================================="
+
+          test -f data/analysis/options_greeks.csv
+
+          python - <<'PY'
+          import pandas as pd
+
+          file = "data/analysis/options_greeks.csv"
+
+          df = pd.read_csv(file)
+
+          print("ROWS       :", len(df))
+          print("COLUMNS    :", len(df.columns))
+          print("TICKERS    :", df["symbol"].nunique())
+          print("DTE MIN    :", df["DTE"].min())
+          print("DTE MAX    :", df["DTE"].max())
+
+          print(
+              "VALID DELTA:",
+              df["delta"].notna().sum()
+          )
+
+          print(
+              "VALID GAMMA:",
+              df["gamma"].notna().sum()
+          )
+
+          print(
+              "VALID VEGA :",
+              df["vega"].notna().sum()
+          )
+
+          if len(df) != 291997:
+              raise RuntimeError(
+                  f"Unexpected Greeks rows: {len(df)}"
+              )
+
+          if df["symbol"].nunique() != 548:
+              raise RuntimeError(
+                  f"Unexpected ticker count: "
+                  f"{df['symbol'].nunique()}"
+              )
+
+          print("CURRENT GREEKS : OK")
+          PY
+
+      # ============================================================
+      # 8. STEP 5
+      # ============================================================
+
+      - name: Run STEP 5 Unusual Flow
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "RUN STEP 5 UNUSUAL FLOW"
+          echo "=========================================="
+
+          python src/05_unusual_flow.py
+
+      # ============================================================
+      # 9. STEP 5 VALIDATION
+      # ============================================================
+
+      - name: Validate STEP 5
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "STEP 5 OUTPUT CHECK"
+          echo "=========================================="
+
+          test -f data/analysis/unusual_flow.csv
+
+          python - <<'PY'
+          import pandas as pd
+
+          file = "data/analysis/unusual_flow.csv"
+
+          df = pd.read_csv(file)
+
+          print("ROWS        :", len(df))
+          print("COLUMNS     :", len(df.columns))
+          print("TICKERS     :", df["symbol"].nunique())
+
+          print(
+              "FLOW SCORE  :",
+              df["flow_score"].notna().sum()
+          )
+
+          print(
+              "BUY EST.    :",
+              (df["trade_side_estimate"] == "BUY EST.").sum()
+          )
+
+          print(
+              "SELL EST.   :",
+              (df["trade_side_estimate"] == "SELL EST.").sum()
+          )
+
+          if len(df) != 291997:
+              raise RuntimeError(
+                  f"Unexpected STEP 5 rows: {len(df)}"
+              )
+
+          if df["symbol"].nunique() != 548:
+              raise RuntimeError(
+                  f"Unexpected STEP 5 ticker count: "
+                  f"{df['symbol'].nunique()}"
+              )
+
+          print("STEP 5 OUTPUT : OK")
+          PY
+
+      # ============================================================
+      # 10. STEP 6
+      # ============================================================
+
+      - name: Run STEP 6 TOP 20
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "RUN STEP 6 TOP 20"
+          echo "=========================================="
+
+          python src/06_top20.py
+
+      # ============================================================
+      # 11. STEP 6 VALIDATION
+      # ============================================================
+
+      - name: Validate STEP 6 TOP 20
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "STEP 6 OUTPUT CHECK"
+          echo "=========================================="
+
+          test -f data/analysis/top20.csv
+
+          python - <<'PY'
+          import pandas as pd
+
+          file = "data/analysis/top20.csv"
+
+          df = pd.read_csv(file)
+
+          print("TOP20 ROWS :", len(df))
+          print("TICKERS    :", df["symbol"].nunique())
+          print("RANK MIN   :", df["rank"].min())
+          print("RANK MAX   :", df["rank"].max())
+
+          print()
+          print("==========================================")
+          print("🔥 FINAL TOP 20")
+          print("==========================================")
+
+          columns = [
+              "rank",
+              "symbol",
+              "top20_score",
+              "max_flow_score",
+              "total_premium",
+              "call_put_imbalance",
+              "max_volume_oi",
+              "estimated_direction",
+          ]
+
+          print(
+              df[columns]
+              .to_string(index=False)
+          )
+
+          if len(df) != 20:
+              raise RuntimeError(
+                  f"TOP 20 validation failed: "
+                  f"{len(df)} rows"
+              )
+
+          if df["symbol"].nunique() != 20:
+              raise RuntimeError(
+                  "TOP 20 contains duplicate symbols."
+              )
+
+          if list(df["rank"]) != list(range(1, 21)):
+              raise RuntimeError(
+                  "TOP 20 rank validation failed."
+              )
+
+          print()
+          print("TOP20 CHECK : OK")
+          PY
+
+      # ============================================================
+      # 12. REMOVE LOCAL-ONLY GENERATED FILES
+      #
+      # IMPORTANT:
+      # Never commit these files.
+      # ============================================================
+
+      - name: Remove generated local-only CSV files
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "REMOVE LOCAL-ONLY FILES"
+          echo "=========================================="
+
+          rm -f data/analysis/options_greeks.csv
+          rm -f data/analysis/unusual_flow.csv
+
+          echo "LOCAL-ONLY FILES REMOVED"
+
+      # ============================================================
+      # 13. GIT STATUS
+      # ============================================================
+
+      - name: Check Git Status
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "GIT STATUS CHECK"
+          echo "=========================================="
+
+          git status --short
+
+      # ============================================================
+      # 14. COMMIT ONLY TOP20
+      # ============================================================
+
+      - name: Commit TOP 20
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "COMMIT STEP 6 TOP20"
+          echo "=========================================="
+
+          git config user.name "github-actions[bot]"
+
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add data/analysis/top20.csv
+
+          if git diff --cached --quiet; then
+
+            echo "NO TOP20 CHANGES"
+
+          else
+
+            git commit \
+              -m "Update top 20 unusual option flow"
+
+          fi
+
+      # ============================================================
+      # 15. SYNC
+      # ============================================================
+
+      - name: Sync with remote main
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "SYNC WITH REMOTE MAIN"
+          echo "=========================================="
+
+          git fetch origin main
+
+          git rebase origin/main
+
+          echo "REBASE : OK"
+
+      # ============================================================
+      # 16. PUSH ONLY TOP20 COMMIT
+      # ============================================================
+
+      - name: Push TOP 20
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "PUSH STEP 6 DATA"
+          echo "=========================================="
+
+          git push origin HEAD:main
+
+          echo "PUSH : OK"
+
+      # ============================================================
+      # 17. ARTIFACT
+      # ============================================================
+
+      - name: Upload TOP 20 Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: step6-top20
+          path: data/analysis/top20.csv
+          retention-days: 7
+
+      # ============================================================
+      # 18. FINAL
+      # ============================================================
+
+      - name: STEP 5-6 Complete
+        run: |
+
+          echo "=========================================="
+          echo "STEP 5-6 COMPLETE"
+          echo "=========================================="
+
+          echo "STEP 4 source : data/normalized/options_normalized.csv"
+          echo "STEP 4 output : LOCAL options_greeks.csv"
+          echo "STEP 5 output : LOCAL unusual_flow.csv"
+          echo "STEP 6 output : data/analysis/top20.csv"
+
+          echo "STEP 4 Greeks : NOT COMMITTED"
+          echo "STEP 5 Flow   : NOT COMMITTED"
+          echo "TOP20        : COMMITTED"
+
+          echo "Expected normalized rows : 291997"
+          echo "Expected ticker count    : 548"
+          echo "Expected TOP20 rows      : 20"
+
+          echo "STEP 5-6 VERIFIED."
