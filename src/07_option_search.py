@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 from datetime import datetime, timezone
 
@@ -11,16 +13,19 @@ import pandas as pd
 
 TOP20_FILE = "data/analysis/top20.csv"
 GREEKS_FILE = "data/analysis/options_greeks.csv"
-FLOW_FILE = "data/analysis/unusual_flow.csv"
 
 OUTPUT_DIR = "data/analysis"
+
 OUTPUT_FILE = os.path.join(
     OUTPUT_DIR,
-    "option_search.csv"
+    "option_search.csv",
 )
 
 TOP_CALLS = 5
 TOP_PUTS = 5
+
+BUY_THRESHOLD = 0.80
+SELL_THRESHOLD = 0.20
 
 
 # ============================================================
@@ -48,7 +53,7 @@ def numeric(series):
 
     return pd.to_numeric(
         series,
-        errors="coerce"
+        errors="coerce",
     )
 
 
@@ -56,19 +61,281 @@ def numeric(series):
 # SAFE FLOAT
 # ============================================================
 
-def safe_float(value, default=0.0):
+def safe_float(
+    value,
+    default=0.0,
+):
 
     try:
 
-        value = float(value)
+        value = float(
+            value
+        )
 
-        if np.isfinite(value):
+        if np.isfinite(
+            value
+        ):
+
             return value
 
     except Exception:
+
         pass
 
     return default
+
+
+# ============================================================
+# NORMALIZE SIDE
+# ============================================================
+
+def normalize_side(value):
+
+    if pd.isna(value):
+
+        return "UNKNOWN"
+
+    text = (
+        str(value)
+        .upper()
+        .strip()
+    )
+
+    if (
+        "BUY"
+        in text
+    ):
+
+        return "BUY"
+
+    if (
+        "SELL"
+        in text
+    ):
+
+        return "SELL"
+
+    return "UNKNOWN"
+
+
+# ============================================================
+# TRADE SIDE ESTIMATION
+# ============================================================
+
+def estimate_trade_side(row):
+
+    try:
+
+        bid = float(
+            row["bid"]
+        )
+
+        ask = float(
+            row["ask"]
+        )
+
+        last = float(
+            row["lastPrice"]
+        )
+
+    except Exception:
+
+        return (
+            "UNKNOWN",
+            0.0,
+            "INVALID_QUOTE",
+        )
+
+    if not all(
+        np.isfinite(v)
+        for v in [
+            bid,
+            ask,
+            last,
+        ]
+    ):
+
+        return (
+            "UNKNOWN",
+            0.0,
+            "INVALID_QUOTE",
+        )
+
+    if (
+        bid < 0
+        or
+        ask < 0
+        or
+        last <= 0
+        or
+        ask < bid
+    ):
+
+        return (
+            "UNKNOWN",
+            0.0,
+            "INVALID_QUOTE",
+        )
+
+    spread = (
+        ask
+        -
+        bid
+    )
+
+    if spread <= 0:
+
+        return (
+            "UNKNOWN",
+            0.0,
+            "ZERO_SPREAD",
+        )
+
+    # --------------------------------------------------------
+    # AT ASK
+    # --------------------------------------------------------
+
+    if last >= ask:
+
+        return (
+            "BUY EST.",
+            1.0,
+            "AT_OR_ABOVE_ASK",
+        )
+
+    # --------------------------------------------------------
+    # AT BID
+    # --------------------------------------------------------
+
+    if last <= bid:
+
+        return (
+            "SELL EST.",
+            1.0,
+            "AT_OR_BELOW_BID",
+        )
+
+    # --------------------------------------------------------
+    # POSITION INSIDE SPREAD
+    # --------------------------------------------------------
+
+    position = (
+        last
+        -
+        bid
+    ) / spread
+
+    # --------------------------------------------------------
+    # NEAR ASK
+    # --------------------------------------------------------
+
+    if position >= BUY_THRESHOLD:
+
+        confidence = (
+            0.80
+            +
+            (
+                position
+                -
+                BUY_THRESHOLD
+            )
+            /
+            (
+                1.0
+                -
+                BUY_THRESHOLD
+            )
+            *
+            0.20
+        )
+
+        confidence = min(
+            1.0,
+            max(
+                0.80,
+                confidence,
+            ),
+        )
+
+        return (
+            "BUY EST.",
+            confidence,
+            "NEAR_ASK",
+        )
+
+    # --------------------------------------------------------
+    # NEAR BID
+    # --------------------------------------------------------
+
+    if position <= SELL_THRESHOLD:
+
+        confidence = (
+            0.80
+            +
+            (
+                SELL_THRESHOLD
+                -
+                position
+            )
+            /
+            SELL_THRESHOLD
+            *
+            0.20
+        )
+
+        confidence = min(
+            1.0,
+            max(
+                0.80,
+                confidence,
+            ),
+        )
+
+        return (
+            "SELL EST.",
+            confidence,
+            "NEAR_BID",
+        )
+
+    # --------------------------------------------------------
+    # MID / AMBIGUOUS
+    # --------------------------------------------------------
+
+    return (
+        "UNKNOWN",
+        0.0,
+        "MID_AMBIGUOUS",
+    )
+
+
+# ============================================================
+# PERCENTILE SCORE
+# ============================================================
+
+def percentile_score(series):
+
+    series = numeric(
+        series
+    )
+
+    if (
+        series.notna().sum()
+        <= 1
+    ):
+
+        return pd.Series(
+            0.5,
+            index=series.index,
+        )
+
+    return (
+        series
+        .rank(
+            pct=True,
+            method="average",
+        )
+        .fillna(0)
+    )
 
 
 # ============================================================
@@ -86,7 +353,6 @@ def main():
     for file_path in [
         TOP20_FILE,
         GREEKS_FILE,
-        FLOW_FILE,
     ]:
 
         if not os.path.exists(
@@ -110,30 +376,33 @@ def main():
         GREEKS_FILE
     )
 
-    flow = pd.read_csv(
-        FLOW_FILE
+    log(
+        f"TOP20 ROWS : "
+        f"{len(top20):,}"
     )
 
     log(
-        f"TOP20 ROWS : {len(top20):,}"
-    )
-
-    log(
-        f"OPTION ROWS : {len(options):,}"
-    )
-
-    log(
-        f"FLOW ROWS : {len(flow):,}"
+        f"OPTION ROWS : "
+        f"{len(options):,}"
     )
 
     # ========================================================
-    # SHOW INPUT COLUMNS
+    # INPUT CHECK
     # ========================================================
 
     print()
-    print("=" * 72)
-    print("🔎 STEP 7 INPUT COLUMN CHECK")
-    print("=" * 72)
+
+    print(
+        "=" * 72
+    )
+
+    print(
+        "🔎 STEP 7 INPUT COLUMN CHECK"
+    )
+
+    print(
+        "=" * 72
+    )
 
     print(
         "GREEKS COLUMNS:"
@@ -142,18 +411,6 @@ def main():
     print(
         ", ".join(
             options.columns.tolist()
-        )
-    )
-
-    print()
-
-    print(
-        "FLOW COLUMNS:"
-    )
-
-    print(
-        ", ".join(
-            flow.columns.tolist()
         )
     )
 
@@ -170,16 +427,24 @@ def main():
     ]
 
     missing = [
+
         column
-        for column in required_top20
-        if column not in top20.columns
+
+        for column
+        in required_top20
+
+        if column
+        not in top20.columns
     ]
 
     if missing:
 
         raise ValueError(
             "Missing TOP20 columns: "
-            + ", ".join(missing)
+            +
+            ", ".join(
+                missing
+            )
         )
 
     # ========================================================
@@ -187,33 +452,46 @@ def main():
     # ========================================================
 
     required_options = [
+
         "symbol",
         "option_type",
         "strike",
         "DTE",
+
         "volume",
         "openInterest",
+
         "bid",
         "ask",
         "lastPrice",
+
         "impliedVolatility",
         "delta",
         "gamma",
         "vega",
+
         "underlying_price",
     ]
 
     missing = [
+
         column
-        for column in required_options
-        if column not in options.columns
+
+        for column
+        in required_options
+
+        if column
+        not in options.columns
     ]
 
     if missing:
 
         raise ValueError(
             "Missing Greeks columns: "
-            + ", ".join(missing)
+            +
+            ", ".join(
+                missing
+            )
         )
 
     # ========================================================
@@ -221,13 +499,19 @@ def main():
     # ========================================================
 
     top_symbols = (
+
         top20[
             "symbol"
         ]
+
         .dropna()
+
         .astype(str)
+
         .str.upper()
+
         .unique()
+
         .tolist()
     )
 
@@ -244,7 +528,7 @@ def main():
     )
 
     # ========================================================
-    # NORMALIZE SYMBOLS
+    # NORMALIZE SYMBOL
     # ========================================================
 
     options[
@@ -257,32 +541,27 @@ def main():
         .str.upper()
     )
 
-    flow[
-        "symbol"
-    ] = (
-        flow[
-            "symbol"
-        ]
-        .astype(str)
-        .str.upper()
-    )
-
     # ========================================================
-    # NUMERIC OPTIONS
+    # NUMERIC
     # ========================================================
 
     numeric_columns = [
+
         "strike",
         "DTE",
+
         "volume",
         "openInterest",
+
         "bid",
         "ask",
         "lastPrice",
+
         "impliedVolatility",
         "delta",
         "gamma",
         "vega",
+
         "underlying_price",
     ]
 
@@ -309,17 +588,25 @@ def main():
     ].copy()
 
     # ========================================================
-    # DTE FILTER
+    # DTE
     # ========================================================
 
     search = search[
-        (search["DTE"] >= 0)
+        (
+            search[
+                "DTE"
+            ] >= 0
+        )
         &
-        (search["DTE"] <= 180)
+        (
+            search[
+                "DTE"
+            ] <= 180
+        )
     ].copy()
 
     # ========================================================
-    # OPTION SIDE NORMALIZATION
+    # OPTION TYPE
     # ========================================================
 
     search[
@@ -340,6 +627,7 @@ def main():
     search[
         "mid_price"
     ] = (
+
         search[
             "bid"
         ]
@@ -347,7 +635,25 @@ def main():
         search[
             "ask"
         ]
+
     ) / 2.0
+
+    search[
+        "mid_price"
+    ] = (
+        search[
+            "mid_price"
+        ]
+        .where(
+            search[
+                "mid_price"
+            ].gt(0),
+
+            search[
+                "lastPrice"
+            ],
+        )
+    )
 
     # ========================================================
     # VOLUME / OI
@@ -369,14 +675,11 @@ def main():
             "openInterest"
         ],
 
-        np.nan
+        np.nan,
     )
 
     # ========================================================
-    # ESTIMATED PREMIUM
-    #
-    # Use existing premium if STEP 4 contains it.
-    # Otherwise calculate from volume x mid x 100.
+    # PREMIUM
     # ========================================================
 
     if (
@@ -397,247 +700,80 @@ def main():
         search[
             "estimated_traded_premium"
         ] = (
+
             search[
                 "volume"
-            ]
+            ].clip(
+                lower=0
+            )
+
             *
+
             search[
                 "mid_price"
             ].clip(
                 lower=0
             )
+
             *
-            100
+
+            100.0
         )
 
     # ========================================================
-    # FLOW DATA
+    # TRADE SIDE
     # ========================================================
 
-    flow_columns = flow.columns.tolist()
+    log(
+        "ESTIMATING OPTION TRADE SIDE"
+    )
 
-    # --------------------------------------------------------
-    # FIND FLOW SCORE COLUMN
-    # --------------------------------------------------------
+    side_result = search.apply(
+        estimate_trade_side,
+        axis=1,
+        result_type="expand",
+    )
 
-    flow_score_column = None
+    side_result.columns = [
 
-    for candidate in [
-        "flow_score",
-        "unusual_flow_score",
-        "option_flow_score",
-        "score",
-    ]:
-
-        if candidate in flow_columns:
-
-            flow_score_column = candidate
-            break
-
-    if flow_score_column:
-
-        flow[
-            flow_score_column
-        ] = numeric(
-            flow[
-                flow_score_column
-            ]
-        )
-
-        symbol_flow = (
-            flow[
-                [
-                    "symbol",
-                    flow_score_column
-                ]
-            ]
-            .groupby(
-                "symbol",
-                as_index=False
-            )
-            .max()
-        )
-
-        symbol_flow = symbol_flow.rename(
-            columns={
-                flow_score_column:
-                    "symbol_flow_score"
-            }
-        )
-
-        search = search.merge(
-            symbol_flow,
-            on="symbol",
-            how="left"
-        )
-
-    else:
-
-        search[
-            "symbol_flow_score"
-        ] = np.nan
-
-    # ========================================================
-    # FLOW SIDE
-    # ========================================================
-
-    possible_side_columns = [
         "trade_side_estimate",
-        "side",
-        "trade_side",
-        "buy_sell",
-        "flow_side",
+        "trade_side_confidence",
+        "trade_side_method",
     ]
 
-    side_column = None
-
-    for candidate in possible_side_columns:
-
-        if candidate in flow_columns:
-
-            side_column = candidate
-            break
-
-    # ========================================================
-    # If flow data has side AND option identity columns,
-    # attempt a more precise merge.
-    # ========================================================
-
-    if side_column:
-
-        possible_keys = [
-            "symbol",
-            "option_type",
-            "strike",
-            "DTE",
-        ]
-
-        if all(
-            column in flow.columns
-            for column in possible_keys
-        ):
-
-            flow_side = flow[
-                possible_keys
-                + [
-                    side_column
-                ]
-            ].copy()
-
-            flow_side[
-                "option_type"
-            ] = (
-                flow_side[
-                    "option_type"
-                ]
-                .astype(str)
-                .str.upper()
-            )
-
-            flow_side[
-                "strike"
-            ] = numeric(
-                flow_side[
-                    "strike"
-                ]
-            )
-
-            flow_side[
-                "DTE"
-            ] = numeric(
-                flow_side[
-                    "DTE"
-                ]
-            )
-
-            flow_side = (
-                flow_side
-                .drop_duplicates(
-                    subset=possible_keys
-                )
-            )
-
-            flow_side = flow_side.rename(
-                columns={
-                    side_column:
-                        "trade_side_estimate"
-                }
-            )
-
-            search = search.merge(
-                flow_side,
-                on=possible_keys,
-                how="left"
-            )
-
-        else:
-
-            search[
-                "trade_side_estimate"
-            ] = "UNKNOWN"
-
-    else:
-
-        search[
-            "trade_side_estimate"
-        ] = "UNKNOWN"
-
-    # ========================================================
-    # FALLBACK
-    # ========================================================
+    search = pd.concat(
+        [
+            search,
+            side_result,
+        ],
+        axis=1,
+    )
 
     search[
-        "trade_side_estimate"
+        "trade_side"
     ] = (
         search[
             "trade_side_estimate"
         ]
-        .fillna(
-            "UNKNOWN"
+        .apply(
+            normalize_side
         )
-        .astype(str)
     )
 
     search[
-        "symbol_flow_score"
-    ] = search[
-        "symbol_flow_score"
-    ].fillna(
-        0
+        "trade_side_source"
+    ] = (
+        "STEP7_BID_ASK_ESTIMATE"
     )
 
     # ========================================================
-    # PERCENTILE SCORE FUNCTION
-    # ========================================================
-
-    def percentile_score(series):
-
-        series = numeric(
-            series
-        )
-
-        if series.notna().sum() <= 1:
-
-            return pd.Series(
-                0.5,
-                index=series.index
-            )
-
-        return (
-            series.rank(
-                pct=True,
-                method="average"
-            )
-            .fillna(0)
-        )
-
-    # ========================================================
-    # PREMIUM SCORE
+    # OPTION SCORES
     # ========================================================
 
     search[
         "premium_score"
     ] = percentile_score(
+
         np.log1p(
             search[
                 "estimated_traded_premium"
@@ -647,45 +783,27 @@ def main():
         )
     )
 
-    # ========================================================
-    # VOLUME/OI SCORE
-    # ========================================================
-
     search[
         "volume_oi_score"
     ] = percentile_score(
+
         np.log1p(
+
             search[
                 "volume_oi_ratio"
             ]
             .replace(
                 [
                     np.inf,
-                    -np.inf
+                    -np.inf,
                 ],
-                np.nan
+                np.nan,
             )
             .clip(
                 lower=0
             )
         )
     )
-
-    # ========================================================
-    # FLOW SCORE
-    # ========================================================
-
-    search[
-        "flow_score_norm"
-    ] = percentile_score(
-        search[
-            "symbol_flow_score"
-        ]
-    )
-
-    # ========================================================
-    # GAMMA SCORE
-    # ========================================================
 
     search[
         "gamma_score"
@@ -694,10 +812,6 @@ def main():
             "gamma"
         ].abs()
     )
-
-    # ========================================================
-    # DELTA SCORE
-    # ========================================================
 
     search[
         "delta_score"
@@ -733,7 +847,7 @@ def main():
             "underlying_price"
         ],
 
-        np.nan
+        np.nan,
     )
 
     search[
@@ -754,41 +868,53 @@ def main():
 
         search[
             "premium_score"
-        ] * 30
+        ]
+        *
+        30
 
         +
 
         search[
             "volume_oi_score"
-        ] * 20
-
-        +
-
-        search[
-            "flow_score_norm"
-        ] * 30
+        ]
+        *
+        20
 
         +
 
         search[
             "gamma_score"
-        ] * 10
+        ]
+        *
+        20
 
         +
 
         search[
             "delta_score"
-        ] * 5
+        ]
+        *
+        10
 
         +
 
         search[
             "moneyness_score"
-        ] * 5
+        ]
+        *
+        10
+
+        +
+
+        search[
+            "trade_side_confidence"
+        ]
+        *
+        10
     )
 
     # ========================================================
-    # RESULT
+    # RESULTS
     # ========================================================
 
     results = []
@@ -802,7 +928,9 @@ def main():
         group = search[
             search[
                 "symbol"
-            ] == symbol
+            ]
+            ==
+            symbol
         ].copy()
 
         if group.empty:
@@ -820,23 +948,27 @@ def main():
         )
 
         # ----------------------------------------------------
-        # CALLS
+        # CALL
         # ----------------------------------------------------
 
         calls = group[
             group[
                 "option_type"
-            ] == "CALL"
+            ]
+            ==
+            "CALL"
         ].copy()
 
         # ----------------------------------------------------
-        # PUTS
+        # PUT
         # ----------------------------------------------------
 
         puts = group[
             group[
                 "option_type"
-            ] == "PUT"
+            ]
+            ==
+            "PUT"
         ].copy()
 
         # ----------------------------------------------------
@@ -847,7 +979,7 @@ def main():
             calls
             .sort_values(
                 "option_importance_score",
-                ascending=False
+                ascending=False,
             )
             .head(
                 TOP_CALLS
@@ -862,7 +994,7 @@ def main():
             puts
             .sort_values(
                 "option_importance_score",
-                ascending=False
+                ascending=False,
             )
             .head(
                 TOP_PUTS
@@ -894,26 +1026,36 @@ def main():
         if total_premium > 0:
 
             call_put_imbalance = (
+
                 call_premium
                 -
                 put_premium
+
             ) / total_premium
 
         else:
 
-            call_put_imbalance = 0
+            call_put_imbalance = 0.0
 
         # ----------------------------------------------------
         # STRUCTURE BIAS
         # ----------------------------------------------------
 
-        if call_put_imbalance >= 0.25:
+        if (
+            call_put_imbalance
+            >=
+            0.25
+        ):
 
             structure_bias = (
                 "CALL DOMINANT"
             )
 
-        elif call_put_imbalance <= -0.25:
+        elif (
+            call_put_imbalance
+            <=
+            -0.25
+        ):
 
             structure_bias = (
                 "PUT DOMINANT"
@@ -939,7 +1081,9 @@ def main():
                     calls[
                         "openInterest"
                     ]
-                ) * 35
+                )
+                *
+                35
 
                 +
 
@@ -947,7 +1091,9 @@ def main():
                     calls[
                         "volume"
                     ]
-                ) * 20
+                )
+                *
+                20
 
                 +
 
@@ -955,7 +1101,9 @@ def main():
                     calls[
                         "estimated_traded_premium"
                     ]
-                ) * 20
+                )
+                *
+                20
 
                 +
 
@@ -963,7 +1111,9 @@ def main():
                     calls[
                         "gamma"
                     ].abs()
-                ) * 15
+                )
+                *
+                15
 
                 +
 
@@ -971,14 +1121,16 @@ def main():
                     -calls[
                         "moneyness_distance"
                     ]
-                ) * 10
+                )
+                *
+                10
             )
 
             call_wall = (
                 calls
                 .sort_values(
                     "wall_score",
-                    ascending=False
+                    ascending=False,
                 )
                 .iloc[0]
             )
@@ -1007,7 +1159,9 @@ def main():
                     puts[
                         "openInterest"
                     ]
-                ) * 35
+                )
+                *
+                35
 
                 +
 
@@ -1015,7 +1169,9 @@ def main():
                     puts[
                         "volume"
                     ]
-                ) * 20
+                )
+                *
+                20
 
                 +
 
@@ -1023,7 +1179,9 @@ def main():
                     puts[
                         "estimated_traded_premium"
                     ]
-                ) * 20
+                )
+                *
+                20
 
                 +
 
@@ -1031,7 +1189,9 @@ def main():
                     puts[
                         "gamma"
                     ].abs()
-                ) * 15
+                )
+                *
+                15
 
                 +
 
@@ -1039,14 +1199,16 @@ def main():
                     -puts[
                         "moneyness_distance"
                     ]
-                ) * 10
+                )
+                *
+                10
             )
 
             put_wall = (
                 puts
                 .sort_values(
                     "wall_score",
-                    ascending=False
+                    ascending=False,
                 )
                 .iloc[0]
             )
@@ -1114,35 +1276,50 @@ def main():
                 iv_display = iv
 
             return (
+
                 f"${safe_float(row['strike']):.2f}"
-                f" "
-                f"{row['option_type']}"
+                f" {row['option_type']}"
+
                 f" | DTE "
                 f"{int(safe_float(row['DTE']))}"
+
                 f" | Vol "
                 f"{int(safe_float(row['volume']))}"
+
                 f" | OI "
                 f"{int(safe_float(row['openInterest']))}"
+
                 f" | IV "
                 f"{iv_display:.1f}%"
+
                 f" | Delta "
                 f"{safe_float(row['delta']):+.2f}"
+
                 f" | Gamma "
                 f"{safe_float(row['gamma']):.4f}"
+
                 f" | Premium "
                 f"${safe_float(row['estimated_traded_premium']):,.0f}"
+
                 f" | "
                 f"{row['trade_side_estimate']}"
+
+                f" | Conf "
+                f"{safe_float(row['trade_side_confidence']):.2f}"
             )
 
         top_call_text = " || ".join(
+
             format_option(row)
+
             for _, row
             in top_calls.iterrows()
         )
 
         top_put_text = " || ".join(
+
             format_option(row)
+
             for _, row
             in top_puts.iterrows()
         )
@@ -1150,41 +1327,71 @@ def main():
         # ----------------------------------------------------
         # RISK REVERSAL
         # ----------------------------------------------------
+        #
+        # Only reliable estimates are allowed.
+        #
+        # CALL:
+        #   BUY + confidence >= 0.80
+        #
+        # PUT:
+        #   SELL + confidence >= 0.80
+        #
+        # DTE difference <= 14
+        #
+        # CALL strike > PUT strike
+        # ----------------------------------------------------
 
         best_rr = None
 
         if (
             not calls.empty
-            and not puts.empty
+            and
+            not puts.empty
         ):
 
-            for _, call in calls.iterrows():
-
-                call_side = str(
-                    call[
-                        "trade_side_estimate"
+            reliable_calls = calls[
+                (
+                    calls[
+                        "trade_side"
                     ]
-                ).upper()
+                    ==
+                    "BUY"
+                )
+                &
+                (
+                    calls[
+                        "trade_side_confidence"
+                    ]
+                    >=
+                    0.80
+                )
+            ]
 
-                if (
-                    "BUY" not in call_side
+            reliable_puts = puts[
+                (
+                    puts[
+                        "trade_side"
+                    ]
+                    ==
+                    "SELL"
+                )
+                &
+                (
+                    puts[
+                        "trade_side_confidence"
+                    ]
+                    >=
+                    0.80
+                )
+            ]
+
+            for _, call in (
+                reliable_calls.iterrows()
+            ):
+
+                for _, put in (
+                    reliable_puts.iterrows()
                 ):
-
-                    continue
-
-                for _, put in puts.iterrows():
-
-                    put_side = str(
-                        put[
-                            "trade_side_estimate"
-                        ]
-                    ).upper()
-
-                    if (
-                        "SELL" not in put_side
-                    ):
-
-                        continue
 
                     call_dte = safe_float(
                         call[
@@ -1245,12 +1452,32 @@ def main():
                                 "option_importance_score"
                             ]
                         )
+
+                        +
+
+                        safe_float(
+                            call[
+                                "trade_side_confidence"
+                            ]
+                        )
+                        *
+                        10
+
+                        +
+
+                        safe_float(
+                            put[
+                                "trade_side_confidence"
+                            ]
+                        )
+                        *
+                        10
                     )
 
                     candidate = (
                         rr_score,
                         call,
-                        put
+                        put,
                     )
 
                     if (
@@ -1269,9 +1496,11 @@ def main():
 
         if best_rr is not None:
 
-            rr_score, rr_call, rr_put = (
-                best_rr
-            )
+            (
+                rr_score,
+                rr_call,
+                rr_put,
+            ) = best_rr
 
             rr_status = (
                 "BULLISH "
@@ -1321,9 +1550,11 @@ def main():
             )
 
             rr_score = np.nan
+
             rr_call_strike = np.nan
             rr_call_dte = np.nan
             rr_call_premium = np.nan
+
             rr_put_strike = np.nan
             rr_put_dte = np.nan
             rr_put_premium = np.nan
@@ -1333,6 +1564,7 @@ def main():
         # ----------------------------------------------------
 
         results.append(
+
             {
                 "symbol":
                     symbol,
@@ -1443,23 +1675,63 @@ def main():
 
     os.makedirs(
         OUTPUT_DIR,
-        exist_ok=True
+        exist_ok=True,
     )
 
     result.to_csv(
         OUTPUT_FILE,
-        index=False
+        index=False,
     )
 
     # ========================================================
     # VALIDATION
     # ========================================================
 
+    side_buy = (
+        search[
+            "trade_side"
+        ]
+        ==
+        "BUY"
+    ).sum()
+
+    side_sell = (
+        search[
+            "trade_side"
+        ]
+        ==
+        "SELL"
+    ).sum()
+
+    side_unknown = (
+        search[
+            "trade_side"
+        ]
+        ==
+        "UNKNOWN"
+    ).sum()
+
+    rr_count = (
+        result[
+            "risk_reversal"
+        ]
+        !=
+        "NONE DETECTED"
+    ).sum()
+
     print()
 
-    print("=" * 72)
-    print("🔎 STEP 7 VALIDATION")
-    print("=" * 72)
+    print(
+        "=" * 72
+    )
+
+    print(
+        "🔎 STEP 7 VALIDATION"
+    )
+
+    print(
+        "=" * 72
+    )
 
     print(
         f"TOP20 INPUT        : "
@@ -1502,16 +1774,55 @@ def main():
     )
 
     print(
-        "FLOW DATA LINK     : OK"
+        "FLOW DATA LINK     : DIRECT FROM GREEKS"
     )
 
     print()
 
-    print("=" * 72)
-    print("🔥 OPTION SEARCH SUMMARY")
-    print("=" * 72)
+    print(
+        f"BUY EST.           : "
+        f"{side_buy:,}"
+    )
 
     print(
+        f"SELL EST.          : "
+        f"{side_sell:,}"
+    )
+
+    print(
+        f"UNKNOWN            : "
+        f"{side_unknown:,}"
+    )
+
+    print()
+
+    print(
+        f"RISK REVERSAL      : "
+        f"{rr_count:,}"
+    )
+
+    print()
+
+    print(
+        "UNUSUAL FLOW CSV   : NOT USED"
+    )
+
+    print()
+
+    print(
+        "=" * 72
+    )
+
+    print(
+        "🔥 OPTION SEARCH SUMMARY"
+    )
+
+    print(
+        "=" * 72
+    )
+
+    print(
+
         result[
             [
                 "symbol",
@@ -1526,18 +1837,29 @@ def main():
                 "put_wall",
                 "risk_reversal",
             ]
-        ].to_string(
+        ]
+        .to_string(
             index=False
         )
     )
 
     print()
 
-    print("=" * 72)
-    print("🔥 RISK REVERSAL SUMMARY")
-    print("=" * 72)
+    print(
+        "=" * 72
+    )
 
-    for _, row in result.iterrows():
+    print(
+        "🔥 RISK REVERSAL SUMMARY"
+    )
+
+    print(
+        "=" * 72
+    )
+
+    for _, row in (
+        result.iterrows()
+    ):
 
         print(
             f"{row['symbol']} → "
@@ -1545,8 +1867,11 @@ def main():
         )
 
         if (
-            row["risk_reversal"]
-            != "NONE DETECTED"
+            row[
+                "risk_reversal"
+            ]
+            !=
+            "NONE DETECTED"
         ):
 
             print(
@@ -1574,16 +1899,15 @@ def main():
         f"{OUTPUT_FILE}"
     )
 
-    print("=" * 72)
+    print(
+        "=" * 72
+    )
 
     log(
         "STEP 7 OPTION SEARCH COMPLETE"
     )
 
 
-# ============================================================
-# RUN
-# ============================================================
-
 if __name__ == "__main__":
+
     main()
