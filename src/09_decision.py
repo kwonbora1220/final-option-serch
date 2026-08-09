@@ -7,6 +7,32 @@ import pandas as pd
 
 # ============================================================
 # STEP 9 - FINAL DECISION ENGINE
+#
+# PURPOSE
+# ------------------------------------------------------------
+# TOP20 + STEP 1 MARKET REGIME + STEP 8 STRUCTURE
+# 를 종합하여 최종 점수와 진입/관망/회피를 결정한다.
+#
+# IMPORTANT
+# ------------------------------------------------------------
+# STEP 8의 GEX가 0이면 억지로 Positive/Negative로
+# 판단하지 않는다.
+#
+# 대신 실제 사용 가능한:
+#   - Market
+#   - Flow
+#   - Flow Direction
+#   - Price Location
+#   - Support / Resistance
+#   - Call Wall / Put Wall
+#   - Wall Structure
+#   - Index Alignment
+# 을 이용한다.
+# ============================================================
+
+
+# ============================================================
+# PATH
 # ============================================================
 
 BASE_DIR = os.path.dirname(
@@ -49,11 +75,14 @@ OUTPUT_FILE = os.path.join(
 
 # ============================================================
 # DECISION WEIGHTS
+#
+# TOTAL = 100
 # ============================================================
 
-MARKET_WEIGHT = 25.0
-FLOW_WEIGHT = 30.0
-STRUCTURE_WEIGHT = 20.0
+MARKET_WEIGHT = 20.0
+FLOW_WEIGHT = 25.0
+DIRECTION_WEIGHT = 15.0
+STRUCTURE_WEIGHT = 15.0
 PRICE_WEIGHT = 15.0
 INDEX_WEIGHT = 10.0
 
@@ -104,6 +133,7 @@ def find_column(df, candidates):
         )
 
         if key in normalized:
+
             return normalized[key]
 
     return None
@@ -129,6 +159,23 @@ def numeric(df, column):
 
 
 # ============================================================
+# TEXT NORMALIZER
+# ============================================================
+
+def clean_text(value):
+
+    if pd.isna(value):
+
+        return ""
+
+    return (
+        str(value)
+        .strip()
+        .upper()
+    )
+
+
+# ============================================================
 # FILE CHECK
 # ============================================================
 
@@ -140,10 +187,18 @@ def check_files():
     print("=" * 78)
 
     files = {
-        "MARKET REGIME": MARKET_FILE,
-        "UNUSUAL FLOW": FLOW_FILE,
-        "TOP20": TOP20_FILE,
-        "STRUCTURE": STRUCTURE_FILE,
+
+        "MARKET REGIME":
+            MARKET_FILE,
+
+        "UNUSUAL FLOW":
+            FLOW_FILE,
+
+        "TOP20":
+            TOP20_FILE,
+
+        "STRUCTURE":
+            STRUCTURE_FILE,
     }
 
     for name, path in files.items():
@@ -293,10 +348,8 @@ def load_market_regime():
 
         else:
 
-            directions[key] = (
-                str(value)
-                .strip()
-                .upper()
+            directions[key] = clean_text(
+                value
             )
 
     print()
@@ -335,14 +388,19 @@ def load_market_regime():
     print("=" * 78)
 
     return {
-        "market_score": market_score,
-        "market_regime": regime,
+
+        "market_score":
+            market_score,
+
+        "market_regime":
+            regime,
+
         **directions
     }
 
 
 # ============================================================
-# FLOW
+# UNUSUAL FLOW
 # ============================================================
 
 def prepare_flow(df):
@@ -426,8 +484,11 @@ def prepare_flow(df):
             as_index=False
         )
         .agg({
+
             "flow_score": "max",
+
             "premium": "sum",
+
             "volume_oi": "max"
         })
     )
@@ -465,6 +526,19 @@ def load_flow():
 
 # ============================================================
 # TOP20
+#
+# IMPORTANT
+# ------------------------------------------------------------
+# TOP20의 추가 정보를 그대로 보존한다.
+#
+# top20_score
+# max_flow_score
+# avg_flow_score
+# call_put_imbalance
+# directional_ratio
+# flow_direction
+# estimated_direction
+# top_dte
 # ============================================================
 
 def load_top20():
@@ -497,53 +571,154 @@ def load_top20():
 
     if ticker_col is None:
 
-        for col in df.columns:
-
-            values = (
-                df[col]
-                .dropna()
-                .astype(str)
-                .str.upper()
-                .str.strip()
-            )
-
-            sample = values.head(20)
-
-            if sample.empty:
-                continue
-
-            valid = sample.str.match(
-                r"^[A-Z]{1,6}$"
-            ).sum()
-
-            if valid >= 2:
-
-                ticker_col = col
-                break
-
-    if ticker_col is None:
-
         raise ValueError(
             "Unable to identify "
             "TOP20 ticker column"
         )
 
-    tickers = (
-        df[ticker_col]
-        .dropna()
+    result = df.copy()
+
+    result["ticker"] = (
+        result[ticker_col]
         .astype(str)
         .str.upper()
         .str.strip()
-        .drop_duplicates()
-        .tolist()
+    )
+
+    # --------------------------------------------------------
+    # NUMERIC TOP20 FIELDS
+    # --------------------------------------------------------
+
+    numeric_map = {
+
+        "top20_score": [
+            "top20_score",
+            "score"
+        ],
+
+        "max_flow_score": [
+            "max_flow_score"
+        ],
+
+        "avg_flow_score": [
+            "avg_flow_score"
+        ],
+
+        "total_volume": [
+            "total_volume"
+        ],
+
+        "total_premium": [
+            "total_premium"
+        ],
+
+        "call_premium": [
+            "call_premium"
+        ],
+
+        "put_premium": [
+            "put_premium"
+        ],
+
+        "call_put_imbalance": [
+            "call_put_imbalance"
+        ],
+
+        "max_volume_oi": [
+            "max_volume_oi"
+        ],
+
+        "avg_volume_oi": [
+            "avg_volume_oi"
+        ],
+
+        "directional_ratio": [
+            "directional_ratio"
+        ],
+
+        "top_dte": [
+            "top_dte"
+        ],
+    }
+
+    for target, candidates in numeric_map.items():
+
+        column = find_column(
+            result,
+            candidates
+        )
+
+        if column is None:
+
+            result[target] = np.nan
+
+        else:
+
+            result[target] = numeric(
+                result,
+                column
+            )
+
+    # --------------------------------------------------------
+    # TEXT TOP20 FIELDS
+    # --------------------------------------------------------
+
+    text_map = {
+
+        "flow_direction": [
+            "flow_direction"
+        ],
+
+        "estimated_direction": [
+            "estimated_direction"
+        ],
+
+        "selection_reason": [
+            "selection_reason"
+        ],
+    }
+
+    for target, candidates in text_map.items():
+
+        column = find_column(
+            result,
+            candidates
+        )
+
+        if column is None:
+
+            result[target] = ""
+
+        else:
+
+            result[target] = (
+                result[column]
+                .fillna("")
+                .astype(str)
+                .str.strip()
+                .str.upper()
+            )
+
+    # --------------------------------------------------------
+    # KEEP FIRST ROW PER TICKER
+    # --------------------------------------------------------
+
+    result = (
+        result
+        .drop_duplicates(
+            "ticker"
+        )
+        .reset_index(
+            drop=True
+        )
     )
 
     log(
         f"TOP20 TICKERS : "
-        f"{len(tickers)}"
+        f"{len(result)}"
     )
 
-    return tickers
+    return result
 
 
 # ============================================================
@@ -591,6 +766,10 @@ def load_structure():
         .str.upper()
         .str.strip()
     )
+
+    # --------------------------------------------------------
+    # NUMERIC
+    # --------------------------------------------------------
 
     numeric_columns = {
 
@@ -642,48 +821,63 @@ def load_structure():
             column
         )
 
-    structure_col = find_column(
-        df,
-        [
+    # --------------------------------------------------------
+    # TEXT
+    # --------------------------------------------------------
+
+    text_columns = {
+
+        "structure": [
             "structure",
             "structure_type"
-        ]
-    )
+        ],
 
-    if structure_col is not None:
+        "price_location": [
+            "price_location"
+        ],
 
-        result["structure"] = (
-            df[structure_col]
-            .fillna("UNAVAILABLE")
-            .astype(str)
-            .str.strip()
-        )
+        "gex_structure": [
+            "gex_structure"
+        ],
 
-    else:
+        "wall_structure": [
+            "wall_structure"
+        ],
 
-        result["structure"] = (
-            "UNAVAILABLE"
-        )
-
-    gex_source_col = find_column(
-        df,
-        [
+        "gex_source": [
             "gex_source"
-        ]
-    )
+        ],
+    }
 
-    if gex_source_col is not None:
+    for target, candidates in text_columns.items():
 
-        result["gex_source"] = (
-            df[gex_source_col]
-            .fillna("UNKNOWN")
-            .astype(str)
-            .str.strip()
+        column = find_column(
+            df,
+            candidates
         )
 
-    else:
+        if column is None:
 
-        result["gex_source"] = "UNKNOWN"
+            result[target] = ""
+
+        else:
+
+            result[target] = (
+                df[column]
+                .fillna("")
+                .astype(str)
+                .str.strip()
+            )
+
+    result = (
+        result
+        .drop_duplicates(
+            "ticker"
+        )
+        .reset_index(
+            drop=True
+        )
+    )
 
     log(
         f"STRUCTURE ROWS : "
@@ -694,12 +888,20 @@ def load_structure():
 
 
 # ============================================================
-# MARKET SCORE COMPONENT
+# MARKET COMPONENT
 # ============================================================
 
 def calculate_market_component(
     market_score
 ):
+
+    market_score = max(
+        0.0,
+        min(
+            100.0,
+            float(market_score)
+        )
+    )
 
     return (
         market_score
@@ -713,126 +915,462 @@ def calculate_market_component(
 # ============================================================
 
 def calculate_flow_component(
-    flow_score
+    flow_score,
+    top20_score
 ):
 
-    if pd.isna(flow_score):
+    values = []
 
-        return (
-            50.0
-            / 100.0
-            * FLOW_WEIGHT
+    if not pd.isna(flow_score):
+
+        values.append(
+            float(flow_score)
         )
 
-    flow_score = max(
+    if not pd.isna(top20_score):
+
+        values.append(
+            float(top20_score)
+        )
+
+    if not values:
+
+        score = 50.0
+
+    else:
+
+        score = float(
+            np.mean(values)
+        )
+
+    score = max(
         0.0,
         min(
             100.0,
-            float(flow_score)
+            score
         )
     )
 
     return (
-        flow_score
+        score
         / 100.0
-        * FLOW_WEIGHT
+        * FLOW_WEIGHT,
+        score
     )
 
 
 # ============================================================
-# GEX COMPONENT
+# FLOW DIRECTION COMPONENT
+#
+# CALL DOMINANT itself is NOT automatically bullish.
+#
+# We combine:
+#   flow_direction
+#   estimated_direction
+#   directional_ratio
+#   call_put_imbalance
 # ============================================================
 
-def calculate_gex_component(
+def calculate_direction_component(
+    flow_direction,
+    estimated_direction,
+    directional_ratio,
+    call_put_imbalance
+):
+
+    score = 50.0
+
+    reasons = []
+
+    flow_direction = clean_text(
+        flow_direction
+    )
+
+    estimated_direction = clean_text(
+        estimated_direction
+    )
+
+    # --------------------------------------------------------
+    # ESTIMATED DIRECTION
+    # --------------------------------------------------------
+
+    if (
+        "BUY" in estimated_direction
+        and "SELL" not in estimated_direction
+    ):
+
+        score += 25
+
+        reasons.append(
+            "Buy-side estimate"
+        )
+
+    elif (
+        "SELL" in estimated_direction
+        and "BUY" not in estimated_direction
+    ):
+
+        score -= 25
+
+        reasons.append(
+            "Sell-side estimate"
+        )
+
+    # --------------------------------------------------------
+    # FLOW DIRECTION
+    # --------------------------------------------------------
+
+    if "CALL DOMINANT" in flow_direction:
+
+        score += 10
+
+        reasons.append(
+            "Call dominant flow"
+        )
+
+    elif "PUT DOMINANT" in flow_direction:
+
+        score -= 10
+
+        reasons.append(
+            "Put dominant flow"
+        )
+
+    elif "BALANCED" in flow_direction:
+
+        reasons.append(
+            "Balanced flow"
+        )
+
+    # --------------------------------------------------------
+    # DIRECTIONAL RATIO
+    # --------------------------------------------------------
+
+    if not pd.isna(directional_ratio):
+
+        ratio = float(
+            directional_ratio
+        )
+
+        ratio = max(
+            -1.0,
+            min(
+                1.0,
+                ratio
+            )
+        )
+
+        score += (
+            ratio
+            * 15.0
+        )
+
+        if ratio >= 0.30:
+
+            reasons.append(
+                "Positive directional ratio"
+            )
+
+        elif ratio <= -0.30:
+
+            reasons.append(
+                "Negative directional ratio"
+            )
+
+    # --------------------------------------------------------
+    # CALL / PUT IMBALANCE
+    # --------------------------------------------------------
+
+    if not pd.isna(call_put_imbalance):
+
+        imbalance = float(
+            call_put_imbalance
+        )
+
+        imbalance = max(
+            -1.0,
+            min(
+                1.0,
+                imbalance
+            )
+        )
+
+        score += (
+            imbalance
+            * 10.0
+        )
+
+    score = max(
+        0.0,
+        min(
+            100.0,
+            score
+        )
+    )
+
+    component = (
+        score
+        / 100.0
+        * DIRECTION_WEIGHT
+    )
+
+    if not reasons:
+
+        reasons.append(
+            "Flow direction unavailable"
+        )
+
+    return (
+        component,
+        score,
+        " | ".join(reasons)
+    )
+
+
+# ============================================================
+# STRUCTURE COMPONENT
+#
+# STEP 8 실제 컬럼:
+#
+# structure
+# price_location
+# gex_structure
+# wall_structure
+#
+# GEX가 0이면 GEX 방향성을 억지로 만들지 않는다.
+# ============================================================
+
+def calculate_structure_component(
+    structure,
+    price_location,
+    gex_structure,
+    wall_structure,
     call_gex,
     put_gex,
     net_gex
 ):
 
-    if (
-        pd.isna(net_gex)
-        and pd.isna(call_gex)
-        and pd.isna(put_gex)
-    ):
+    score = 50.0
 
-        return (
-            50.0
-            / 100.0
-            * STRUCTURE_WEIGHT
-        ), "GEX unavailable"
+    reasons = []
 
-    call = (
-        0.0
-        if pd.isna(call_gex)
-        else abs(float(call_gex))
+    structure_text = clean_text(
+        structure
     )
 
-    put = (
-        0.0
-        if pd.isna(put_gex)
-        else abs(float(put_gex))
+    price_text = clean_text(
+        price_location
     )
 
-    net = (
-        0.0
-        if pd.isna(net_gex)
-        else float(net_gex)
+    gex_text = clean_text(
+        gex_structure
     )
 
-    total = call + put
+    wall_text = clean_text(
+        wall_structure
+    )
 
-    if total <= 0:
+    # --------------------------------------------------------
+    # STRUCTURE DIRECTION
+    # --------------------------------------------------------
 
-        return (
-            50.0
-            / 100.0
-            * STRUCTURE_WEIGHT
-        ), "Neutral GEX"
+    if "BULLISH" in structure_text:
 
-    ratio = net / total
+        score += 25
 
-    ratio = max(
-        -1.0,
-        min(
-            1.0,
-            ratio
+        reasons.append(
+            "Bullish structure"
         )
-    )
 
-    # -1 = 0 score
-    #  0 = 50 score
-    # +1 = 100 score
+    elif "BEARISH" in structure_text:
 
-    normalized = (
-        ratio + 1.0
-    ) / 2.0
+        score -= 25
 
-    component = (
-        normalized
-        * STRUCTURE_WEIGHT
-    )
-
-    if ratio >= 0.50:
-
-        reason = "Strong positive GEX"
-
-    elif ratio >= 0.15:
-
-        reason = "Positive GEX"
-
-    elif ratio <= -0.50:
-
-        reason = "Strong negative GEX"
-
-    elif ratio <= -0.15:
-
-        reason = "Negative GEX"
+        reasons.append(
+            "Bearish structure"
+        )
 
     else:
 
-        reason = "Neutral GEX"
+        reasons.append(
+            "Neutral structure"
+        )
 
-    return component, reason
+    # --------------------------------------------------------
+    # PRICE LOCATION
+    # --------------------------------------------------------
+
+    if (
+        "ABOVE SUPPORT" in price_text
+        and "BELOW RESISTANCE" in price_text
+    ):
+
+        score += 10
+
+        reasons.append(
+            "Inside support/resistance range"
+        )
+
+    elif "ABOVE SUPPORT" in price_text:
+
+        score += 5
+
+        reasons.append(
+            "Above support"
+        )
+
+    elif "BELOW SUPPORT" in price_text:
+
+        score -= 15
+
+        reasons.append(
+            "Below support"
+        )
+
+    if "ABOVE RESISTANCE" in price_text:
+
+        score -= 10
+
+        reasons.append(
+            "Above resistance"
+        )
+
+    # --------------------------------------------------------
+    # WALL STRUCTURE
+    # --------------------------------------------------------
+
+    if "BULL" in wall_text:
+
+        score += 10
+
+        reasons.append(
+            "Bullish wall structure"
+        )
+
+    elif "BEAR" in wall_text:
+
+        score -= 10
+
+        reasons.append(
+            "Bearish wall structure"
+        )
+
+    elif "RANGE" in wall_text:
+
+        reasons.append(
+            "Range wall structure"
+        )
+
+    # --------------------------------------------------------
+    # GEX
+    # --------------------------------------------------------
+    #
+    # If actual GEX exists, use it.
+    # If all GEX = 0, do NOT manufacture direction.
+    # --------------------------------------------------------
+
+    gex_available = False
+
+    call_value = 0.0
+
+    put_value = 0.0
+
+    net_value = 0.0
+
+    if not pd.isna(call_gex):
+
+        call_value = float(
+            call_gex
+        )
+
+    if not pd.isna(put_gex):
+
+        put_value = float(
+            put_gex
+        )
+
+    if not pd.isna(net_gex):
+
+        net_value = float(
+            net_gex
+        )
+
+    if (
+        abs(call_value)
+        + abs(put_value)
+        > 0
+    ):
+
+        gex_available = True
+
+    if gex_available:
+
+        total = (
+            abs(call_value)
+            + abs(put_value)
+        )
+
+        ratio = (
+            net_value
+            / total
+        )
+
+        ratio = max(
+            -1.0,
+            min(
+                1.0,
+                ratio
+            )
+        )
+
+        score += (
+            ratio
+            * 20.0
+        )
+
+        if ratio >= 0.30:
+
+            reasons.append(
+                "Positive GEX"
+            )
+
+        elif ratio <= -0.30:
+
+            reasons.append(
+                "Negative GEX"
+            )
+
+        else:
+
+            reasons.append(
+                "Neutral GEX"
+            )
+
+    else:
+
+        reasons.append(
+            "GEX unavailable"
+        )
+
+    score = max(
+        0.0,
+        min(
+            100.0,
+            score
+        )
+    )
+
+    component = (
+        score
+        / 100.0
+        * STRUCTURE_WEIGHT
+    )
+
+    return (
+        component,
+        score,
+        " | ".join(reasons)
+    )
 
 
 # ============================================================
@@ -853,8 +1391,13 @@ def calculate_price_component(
             50.0
             / 100.0
             * PRICE_WEIGHT,
+            50.0,
             "Price unavailable"
         )
+
+    current_price = float(
+        current_price
+    )
 
     score_parts = []
 
@@ -866,32 +1409,36 @@ def calculate_price_component(
 
     if (
         not pd.isna(support)
-        and support > 0
+        and float(support) > 0
     ):
 
-        support_distance = (
+        support = float(
+            support
+        )
+
+        distance = (
             current_price - support
         ) / support
 
-        if support_distance >= 0.05:
+        if distance >= 0.05:
 
-            support_score = 100
+            score_parts.append(100)
 
             reasons.append(
                 "Comfortably above support"
             )
 
-        elif support_distance >= 0.02:
+        elif distance >= 0.02:
 
-            support_score = 80
+            score_parts.append(85)
 
             reasons.append(
                 "Above support"
             )
 
-        elif support_distance >= 0:
+        elif distance >= 0:
 
-            support_score = 60
+            score_parts.append(65)
 
             reasons.append(
                 "Near support"
@@ -899,15 +1446,11 @@ def calculate_price_component(
 
         else:
 
-            support_score = 20
+            score_parts.append(15)
 
             reasons.append(
                 "Below support"
             )
-
-        score_parts.append(
-            support_score
-        )
 
     # --------------------------------------------------------
     # RESISTANCE
@@ -915,32 +1458,36 @@ def calculate_price_component(
 
     if (
         not pd.isna(resistance)
-        and resistance > 0
+        and float(resistance) > 0
     ):
 
-        resistance_distance = (
+        resistance = float(
+            resistance
+        )
+
+        distance = (
             resistance - current_price
         ) / resistance
 
-        if resistance_distance >= 0.05:
+        if distance >= 0.05:
 
-            resistance_score = 100
+            score_parts.append(100)
 
             reasons.append(
                 "Room below resistance"
             )
 
-        elif resistance_distance >= 0.02:
+        elif distance >= 0.02:
 
-            resistance_score = 80
+            score_parts.append(85)
 
             reasons.append(
                 "Moderate room below resistance"
             )
 
-        elif resistance_distance >= 0:
+        elif distance >= 0:
 
-            resistance_score = 55
+            score_parts.append(55)
 
             reasons.append(
                 "Near resistance"
@@ -948,15 +1495,11 @@ def calculate_price_component(
 
         else:
 
-            resistance_score = 25
+            score_parts.append(20)
 
             reasons.append(
                 "Above resistance"
             )
-
-        score_parts.append(
-            resistance_score
-        )
 
     # --------------------------------------------------------
     # PUT WALL
@@ -964,16 +1507,20 @@ def calculate_price_component(
 
     if (
         not pd.isna(put_wall)
-        and put_wall > 0
+        and float(put_wall) > 0
     ):
+
+        put_wall = float(
+            put_wall
+        )
 
         if current_price > put_wall:
 
-            put_distance = (
+            distance = (
                 current_price - put_wall
             ) / put_wall
 
-            if put_distance >= 0.03:
+            if distance >= 0.03:
 
                 score_parts.append(100)
 
@@ -986,12 +1533,12 @@ def calculate_price_component(
                 score_parts.append(75)
 
                 reasons.append(
-                    "Slightly above put wall"
+                    "Near put wall"
                 )
 
         else:
 
-            score_parts.append(20)
+            score_parts.append(15)
 
             reasons.append(
                 "Below put wall"
@@ -1003,16 +1550,20 @@ def calculate_price_component(
 
     if (
         not pd.isna(call_wall)
-        and call_wall > 0
+        and float(call_wall) > 0
     ):
+
+        call_wall = float(
+            call_wall
+        )
 
         if current_price < call_wall:
 
-            call_distance = (
+            distance = (
                 call_wall - current_price
             ) / call_wall
 
-            if call_distance >= 0.03:
+            if distance >= 0.03:
 
                 score_parts.append(100)
 
@@ -1030,11 +1581,15 @@ def calculate_price_component(
 
         else:
 
-            score_parts.append(35)
+            score_parts.append(30)
 
             reasons.append(
                 "Above call wall"
             )
+
+    # --------------------------------------------------------
+    # NO DATA
+    # --------------------------------------------------------
 
     if not score_parts:
 
@@ -1042,123 +1597,24 @@ def calculate_price_component(
             50.0
             / 100.0
             * PRICE_WEIGHT,
+            50.0,
             "Price structure unavailable"
         )
 
-    price_score = (
+    score = (
         sum(score_parts)
         / len(score_parts)
     )
 
     component = (
-        price_score
+        score
         / 100.0
         * PRICE_WEIGHT
     )
 
     return (
         component,
-        " | ".join(reasons)
-    )
-
-
-# ============================================================
-# STRUCTURE DIRECTION COMPONENT
-# ============================================================
-
-def calculate_structure_component(
-    structure
-):
-
-    text = str(
-        structure
-    ).upper()
-
-    score = 50.0
-    reasons = []
-
-    # --------------------------------------------------------
-    # DIRECTION
-    # --------------------------------------------------------
-
-    if "BULLISH" in text:
-
-        score += 30
-
-        reasons.append(
-            "Bullish structure"
-        )
-
-    elif "BEARISH" in text:
-
-        score -= 30
-
-        reasons.append(
-            "Bearish structure"
-        )
-
-    else:
-
-        reasons.append(
-            "Neutral structure"
-        )
-
-    # --------------------------------------------------------
-    # GEX
-    # --------------------------------------------------------
-
-    if "POSITIVE GEX" in text:
-
-        score += 10
-
-        reasons.append(
-            "Positive GEX structure"
-        )
-
-    elif "NEGATIVE GEX" in text:
-
-        score -= 10
-
-        reasons.append(
-            "Negative GEX structure"
-        )
-
-    # --------------------------------------------------------
-    # SUPPORT / RESISTANCE
-    # --------------------------------------------------------
-
-    if "ABOVE SUPPORT" in text:
-
-        score += 5
-
-    if "BELOW RESISTANCE" in text:
-
-        score += 5
-
-    if "SUPPORT RISK" in text:
-
-        score -= 5
-
-    if "RESISTANCE RISK" in text:
-
-        score -= 5
-
-    score = max(
-        0.0,
-        min(
-            100.0,
-            score
-        )
-    )
-
-    component = (
-        score
-        / 100.0
-        * STRUCTURE_WEIGHT
-    )
-
-    return (
-        component,
+        score,
         " | ".join(reasons)
     )
 
@@ -1172,6 +1628,7 @@ def calculate_index_component(
 ):
 
     values = [
+
         directions.get(
             "ndx_direction",
             "UNAVAILABLE"
@@ -1203,13 +1660,15 @@ def calculate_index_component(
         for value in values
     )
 
+    neutral = sum(
+        value == "NEUTRAL"
+        for value in values
+    )
+
     available = (
         bullish
         + bearish
-        + sum(
-            value == "NEUTRAL"
-            for value in values
-        )
+        + neutral
     )
 
     if available == 0:
@@ -1239,7 +1698,8 @@ def calculate_index_component(
         reason = (
             f"Index alignment "
             f"BULL {bullish} / "
-            f"BEAR {bearish}"
+            f"BEAR {bearish} / "
+            f"NEUTRAL {neutral}"
         )
 
     component = (
@@ -1250,7 +1710,132 @@ def calculate_index_component(
 
     return (
         component,
+        score,
         reason
+    )
+
+
+# ============================================================
+# HARD RISK FILTER
+# ============================================================
+
+def apply_hard_risk_filters(
+    total,
+    structure_row,
+    direction_score
+):
+
+    hard_risk = False
+
+    reasons = []
+
+    structure_text = clean_text(
+        structure_row["structure"]
+    )
+
+    current_price = (
+        structure_row["current_price"]
+    )
+
+    support = (
+        structure_row["support"]
+    )
+
+    resistance = (
+        structure_row["resistance"]
+    )
+
+    # --------------------------------------------------------
+    # BEARISH STRUCTURE
+    # --------------------------------------------------------
+
+    if "BEARISH" in structure_text:
+
+        if total >= ENTER_THRESHOLD:
+
+            total = min(
+                total,
+                ENTER_THRESHOLD - 0.1
+            )
+
+            hard_risk = True
+
+            reasons.append(
+                "Bearish structure blocks entry"
+            )
+
+    # --------------------------------------------------------
+    # BELOW SUPPORT
+    # --------------------------------------------------------
+
+    if (
+        not pd.isna(current_price)
+        and not pd.isna(support)
+        and float(current_price)
+        < float(support)
+    ):
+
+        total = min(
+            total,
+            WATCH_THRESHOLD - 0.1
+        )
+
+        hard_risk = True
+
+        reasons.append(
+            "Price below calculated support"
+        )
+
+    # --------------------------------------------------------
+    # STRONG NEGATIVE FLOW DIRECTION
+    # --------------------------------------------------------
+
+    if (
+        not pd.isna(direction_score)
+        and direction_score <= 25
+    ):
+
+        if total >= ENTER_THRESHOLD:
+
+            total = min(
+                total,
+                ENTER_THRESHOLD - 0.1
+            )
+
+            hard_risk = True
+
+            reasons.append(
+                "Strong negative flow direction blocks entry"
+            )
+
+    # --------------------------------------------------------
+    # ABOVE RESISTANCE
+    # --------------------------------------------------------
+
+    if (
+        not pd.isna(current_price)
+        and not pd.isna(resistance)
+        and float(current_price)
+        > float(resistance)
+    ):
+
+        if total >= ENTER_THRESHOLD:
+
+            total = min(
+                total,
+                ENTER_THRESHOLD - 0.1
+            )
+
+            hard_risk = True
+
+            reasons.append(
+                "Price above calculated resistance"
+            )
+
+    return (
+        total,
+        hard_risk,
+        reasons
     )
 
 
@@ -1261,6 +1846,7 @@ def calculate_index_component(
 def calculate_decision(
     market,
     flow_score,
+    top20_row,
     structure_row
 ):
 
@@ -1278,56 +1864,124 @@ def calculate_decision(
     # FLOW
     # --------------------------------------------------------
 
-    flow_component = (
+    flow_component, effective_flow_score = (
         calculate_flow_component(
-            flow_score
+
+            flow_score,
+
+            top20_row[
+                "top20_score"
+            ]
         )
     )
 
     # --------------------------------------------------------
-    # GEX
+    # FLOW DIRECTION
     # --------------------------------------------------------
 
-    gex_component, gex_reason = (
-        calculate_gex_component(
-            structure_row["call_gex"],
-            structure_row["put_gex"],
-            structure_row["net_gex"]
-        )
+    (
+        direction_component,
+        direction_score,
+        direction_reason
+    ) = calculate_direction_component(
+
+        top20_row[
+            "flow_direction"
+        ],
+
+        top20_row[
+            "estimated_direction"
+        ],
+
+        top20_row[
+            "directional_ratio"
+        ],
+
+        top20_row[
+            "call_put_imbalance"
+        ]
     )
 
     # --------------------------------------------------------
     # STRUCTURE
     # --------------------------------------------------------
 
-    structure_component, structure_reason = (
-        calculate_structure_component(
-            structure_row["structure"]
-        )
+    (
+        structure_component,
+        structure_score,
+        structure_reason
+    ) = calculate_structure_component(
+
+        structure_row[
+            "structure"
+        ],
+
+        structure_row[
+            "price_location"
+        ],
+
+        structure_row[
+            "gex_structure"
+        ],
+
+        structure_row[
+            "wall_structure"
+        ],
+
+        structure_row[
+            "call_gex"
+        ],
+
+        structure_row[
+            "put_gex"
+        ],
+
+        structure_row[
+            "net_gex"
+        ]
     )
 
     # --------------------------------------------------------
     # PRICE
     # --------------------------------------------------------
 
-    price_component, price_reason = (
-        calculate_price_component(
-            structure_row["current_price"],
-            structure_row["support"],
-            structure_row["resistance"],
-            structure_row["call_wall"],
-            structure_row["put_wall"]
-        )
+    (
+        price_component,
+        price_score,
+        price_reason
+    ) = calculate_price_component(
+
+        structure_row[
+            "current_price"
+        ],
+
+        structure_row[
+            "support"
+        ],
+
+        structure_row[
+            "resistance"
+        ],
+
+        structure_row[
+            "call_wall"
+        ],
+
+        structure_row[
+            "put_wall"
+        ]
     )
 
     # --------------------------------------------------------
     # INDEX
     # --------------------------------------------------------
 
-    index_component, index_reason = (
-        calculate_index_component(
-            market
-        )
+    (
+        index_component,
+        index_score,
+        index_reason
+    ) = calculate_index_component(
+        market
     )
 
     # --------------------------------------------------------
@@ -1335,11 +1989,17 @@ def calculate_decision(
     # --------------------------------------------------------
 
     total = (
+
         market_component
+
         + flow_component
-        + gex_component
+
+        + direction_component
+
         + structure_component
+
         + price_component
+
         + index_component
     )
 
@@ -1352,52 +2012,21 @@ def calculate_decision(
     )
 
     # --------------------------------------------------------
-    # HARD RISK FILTERS
+    # HARD RISK
     # --------------------------------------------------------
 
-    structure_text = str(
-        structure_row["structure"]
-    ).upper()
+    (
+        total,
+        hard_risk,
+        hard_reasons
+    ) = apply_hard_risk_filters(
 
-    hard_risk = False
-    hard_reason = ""
+        total,
 
-    if "BEARISH" in structure_text:
+        structure_row,
 
-        if total >= ENTER_THRESHOLD:
-
-            total = min(
-                total,
-                ENTER_THRESHOLD - 0.1
-            )
-
-            hard_reason = (
-                "Bearish structure blocks entry"
-            )
-
-            hard_risk = True
-
-    if (
-        not pd.isna(
-            structure_row["current_price"]
-        )
-        and not pd.isna(
-            structure_row["support"]
-        )
-        and structure_row["current_price"]
-        < structure_row["support"]
-    ):
-
-        total = min(
-            total,
-            WATCH_THRESHOLD - 0.1
-        )
-
-        hard_reason = (
-            "Price below calculated support"
-        )
-
-        hard_risk = True
+        direction_score
+    )
 
     # --------------------------------------------------------
     # DECISION
@@ -1415,33 +2044,76 @@ def calculate_decision(
 
         decision = "🔴 회피"
 
+    # --------------------------------------------------------
+    # REASONS
+    # --------------------------------------------------------
+
     reasons = [
+
         f"Market {market['market_score']:.1f}",
-        f"Flow {flow_score:.1f}"
-        if not pd.isna(flow_score)
-        else "Flow unavailable",
-        gex_reason,
+
+        f"Flow {effective_flow_score:.1f}",
+
+        f"Direction {direction_score:.1f}",
+
+        direction_reason,
+
         structure_reason,
+
         price_reason,
+
         index_reason
     ]
 
     if hard_risk:
 
-        reasons.append(
-            hard_reason
+        reasons.extend(
+            hard_reasons
         )
 
     return {
-        "market_component": market_component,
-        "flow_component": flow_component,
-        "gex_component": gex_component,
-        "structure_component": structure_component,
-        "price_component": price_component,
-        "index_component": index_component,
-        "decision_score": total,
-        "decision": decision,
-        "reason": " | ".join(reasons)
+
+        "market_component":
+            market_component,
+
+        "flow_component":
+            flow_component,
+
+        "direction_component":
+            direction_component,
+
+        "structure_component":
+            structure_component,
+
+        "price_component":
+            price_component,
+
+        "index_component":
+            index_component,
+
+        "decision_score":
+            total,
+
+        "decision":
+            decision,
+
+        "effective_flow_score":
+            effective_flow_score,
+
+        "direction_score":
+            direction_score,
+
+        "structure_score":
+            structure_score,
+
+        "price_score":
+            price_score,
+
+        "index_score":
+            index_score,
+
+        "reason":
+            " | ".join(reasons)
     }
 
 
@@ -1451,7 +2123,9 @@ def calculate_decision(
 
 def main():
 
-    log("START")
+    log(
+        "START"
+    )
 
     # --------------------------------------------------------
     # CHECK FILES
@@ -1460,7 +2134,7 @@ def main():
     check_files()
 
     # --------------------------------------------------------
-    # LOAD INPUTS
+    # LOAD
     # --------------------------------------------------------
 
     market = load_market_regime()
@@ -1472,54 +2146,127 @@ def main():
     structure = load_structure()
 
     # --------------------------------------------------------
+    # LOOKUP
+    # --------------------------------------------------------
+
+    flow_lookup = (
+        flow
+        .drop_duplicates(
+            "ticker"
+        )
+        .set_index(
+            "ticker"
+        )
+    )
+
+    structure_lookup = (
+        structure
+        .drop_duplicates(
+            "ticker"
+        )
+        .set_index(
+            "ticker"
+        )
+    )
+
+    # --------------------------------------------------------
+    # TOP20 ORDER
+    # --------------------------------------------------------
+
+    top20_tickers = (
+        top20[
+            "ticker"
+        ]
+        .drop_duplicates()
+        .tolist()
+    )
+
+    # --------------------------------------------------------
+    # TOP20 COUNT
+    # --------------------------------------------------------
+
+    if len(top20_tickers) != 20:
+
+        raise ValueError(
+            "TOP20 must contain exactly 20 unique tickers. "
+            f"Found {len(top20_tickers)}"
+        )
+
+    # --------------------------------------------------------
     # DECISION
     # --------------------------------------------------------
 
     rows = []
 
     for rank, ticker in enumerate(
-        top20,
+        top20_tickers,
         start=1
     ):
 
-        structure_rows = structure[
-            structure["ticker"] == ticker
-        ]
+        # ----------------------------------------------------
+        # STRUCTURE
+        # ----------------------------------------------------
 
-        if structure_rows.empty:
+        if ticker not in structure_lookup.index:
 
-            log(
-                f"{ticker} | "
-                "STRUCTURE MISSING"
+            raise ValueError(
+                f"STEP 8 structure missing for {ticker}"
             )
 
-            continue
-
-        flow_rows = flow[
-            flow["ticker"] == ticker
-        ]
-
         structure_row = (
-            structure_rows.iloc[0]
+            structure_lookup
+            .loc[ticker]
         )
 
-        if flow_rows.empty:
+        # ----------------------------------------------------
+        # TOP20
+        # ----------------------------------------------------
 
-            flow_score = np.nan
+        top20_row = (
+            top20[
+                top20["ticker"]
+                == ticker
+            ]
+            .iloc[0]
+        )
+
+        # ----------------------------------------------------
+        # FLOW
+        # ----------------------------------------------------
+
+        if ticker in flow_lookup.index:
+
+            flow_score = (
+                flow_lookup
+                .loc[ticker]
+                .get(
+                    "flow_score",
+                    np.nan
+                )
+            )
 
         else:
 
-            flow_score = (
-                flow_rows.iloc[0][
-                    "flow_score"
-                ]
-            )
+            flow_score = np.nan
+
+        # ----------------------------------------------------
+        # CALCULATE
+        # ----------------------------------------------------
 
         result = calculate_decision(
+
             market,
+
             flow_score,
+
+            top20_row,
+
             structure_row
         )
+
+        # ----------------------------------------------------
+        # OUTPUT ROW
+        # ----------------------------------------------------
 
         rows.append({
 
@@ -1528,6 +2275,10 @@ def main():
 
             "ticker":
                 ticker,
+
+            # ------------------------------------------------
+            # MARKET
+            # ------------------------------------------------
 
             "market_score":
                 market["market_score"],
@@ -1547,8 +2298,85 @@ def main():
             "dia_direction":
                 market["dia_direction"],
 
+            # ------------------------------------------------
+            # TOP20
+            # ------------------------------------------------
+
+            "top20_score":
+                top20_row[
+                    "top20_score"
+                ],
+
+            "max_flow_score":
+                top20_row[
+                    "max_flow_score"
+                ],
+
+            "avg_flow_score":
+                top20_row[
+                    "avg_flow_score"
+                ],
+
+            "total_volume":
+                top20_row[
+                    "total_volume"
+                ],
+
+            "total_premium":
+                top20_row[
+                    "total_premium"
+                ],
+
+            "call_premium":
+                top20_row[
+                    "call_premium"
+                ],
+
+            "put_premium":
+                top20_row[
+                    "put_premium"
+                ],
+
+            "call_put_imbalance":
+                top20_row[
+                    "call_put_imbalance"
+                ],
+
+            "directional_ratio":
+                top20_row[
+                    "directional_ratio"
+                ],
+
+            "flow_direction":
+                top20_row[
+                    "flow_direction"
+                ],
+
+            "estimated_direction":
+                top20_row[
+                    "estimated_direction"
+                ],
+
+            "top_dte":
+                top20_row[
+                    "top_dte"
+                ],
+
+            # ------------------------------------------------
+            # FLOW
+            # ------------------------------------------------
+
             "flow_score":
                 flow_score,
+
+            "effective_flow_score":
+                result[
+                    "effective_flow_score"
+                ],
+
+            # ------------------------------------------------
+            # STRUCTURE
+            # ------------------------------------------------
 
             "current_price":
                 structure_row[
@@ -1600,6 +2428,25 @@ def main():
                     "structure"
                 ],
 
+            "price_location":
+                structure_row[
+                    "price_location"
+                ],
+
+            "gex_structure":
+                structure_row[
+                    "gex_structure"
+                ],
+
+            "wall_structure":
+                structure_row[
+                    "wall_structure"
+                ],
+
+            # ------------------------------------------------
+            # COMPONENTS
+            # ------------------------------------------------
+
             "market_component":
                 result[
                     "market_component"
@@ -1610,9 +2457,9 @@ def main():
                     "flow_component"
                 ],
 
-            "gex_component":
+            "direction_component":
                 result[
-                    "gex_component"
+                    "direction_component"
                 ],
 
             "structure_component":
@@ -1629,6 +2476,34 @@ def main():
                 result[
                     "index_component"
                 ],
+
+            # ------------------------------------------------
+            # RAW SCORES
+            # ------------------------------------------------
+
+            "direction_score":
+                result[
+                    "direction_score"
+                ],
+
+            "structure_score":
+                result[
+                    "structure_score"
+                ],
+
+            "price_score":
+                result[
+                    "price_score"
+                ],
+
+            "index_score":
+                result[
+                    "index_score"
+                ],
+
+            # ------------------------------------------------
+            # FINAL
+            # ------------------------------------------------
 
             "decision_score":
                 result[
@@ -1649,22 +2524,22 @@ def main():
                 "CALCULATED"
         })
 
-        log(
-            f"{ticker} | "
-            f"FLOW {flow_score:.1f}"
-            if not pd.isna(flow_score)
-            else f"{ticker} | FLOW N/A"
-        )
+        # ----------------------------------------------------
+        # LOG
+        # ----------------------------------------------------
 
         log(
             f"{ticker} | "
-            f"FINAL SCORE "
-            f"{result['decision_score']:.2f} | "
+            f"FLOW {result['effective_flow_score']:.1f} | "
+            f"DIRECTION {result['direction_score']:.1f} | "
+            f"STRUCTURE {result['structure_score']:.1f} | "
+            f"PRICE {result['price_score']:.1f} | "
+            f"FINAL {result['decision_score']:.2f} | "
             f"{result['decision']}"
         )
 
     # --------------------------------------------------------
-    # OUTPUT
+    # DATAFRAME
     # --------------------------------------------------------
 
     output = pd.DataFrame(
@@ -1677,12 +2552,16 @@ def main():
             "Decision output is empty"
         )
 
+    # --------------------------------------------------------
+    # SORT
+    # --------------------------------------------------------
+
     output = (
         output
         .sort_values(
             [
                 "decision_score",
-                "flow_score"
+                "effective_flow_score"
             ],
             ascending=[
                 False,
@@ -1698,6 +2577,10 @@ def main():
         output.index + 1
     )
 
+    # --------------------------------------------------------
+    # SAVE
+    # --------------------------------------------------------
+
     os.makedirs(
         ANALYSIS_DIR,
         exist_ok=True
@@ -1708,9 +2591,9 @@ def main():
         index=False
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # VALIDATION
-    # --------------------------------------------------------
+    # ========================================================
 
     print()
     print("=" * 78)
@@ -1729,7 +2612,7 @@ def main():
 
     print(
         f"TOP20 INPUT        : "
-        f"{len(top20)}"
+        f"{len(top20_tickers)}"
     )
 
     print(
@@ -1752,13 +2635,78 @@ def main():
         f"{output['decision'].notna().sum()}"
     )
 
+    # --------------------------------------------------------
+    # SCORE DISTRIBUTION
+    # --------------------------------------------------------
+
+    print()
+    print("SCORE DISTRIBUTION")
+    print("-" * 78)
+
+    print(
+        f"MAX SCORE          : "
+        f"{output['decision_score'].max():.2f}"
+    )
+
+    print(
+        f"MIN SCORE          : "
+        f"{output['decision_score'].min():.2f}"
+    )
+
+    print(
+        f"MEAN SCORE         : "
+        f"{output['decision_score'].mean():.2f}"
+    )
+
+    print(
+        f"UNIQUE SCORES      : "
+        f"{output['decision_score'].nunique()}"
+    )
+
+    # --------------------------------------------------------
+    # COMPONENT CHECK
+    # --------------------------------------------------------
+
+    print()
+    print("COMPONENT CHECK")
+    print("-" * 78)
+
+    for column in [
+
+        "market_component",
+
+        "flow_component",
+
+        "direction_component",
+
+        "structure_component",
+
+        "price_component",
+
+        "index_component"
+    ]:
+
+        print(
+            f"{column:<24} "
+            f"MIN={output[column].min():.2f} "
+            f"MAX={output[column].max():.2f} "
+            f"UNIQUE={output[column].nunique()}"
+        )
+
+    # --------------------------------------------------------
+    # DECISION SUMMARY
+    # --------------------------------------------------------
+
     print()
     print("DECISION SUMMARY")
     print("-" * 50)
 
     for decision in [
+
         "🟢 진입",
+
         "🟡 관망",
+
         "🔴 회피"
     ]:
 
@@ -1771,22 +2719,36 @@ def main():
             f"{decision:<10} : {count}"
         )
 
+    # --------------------------------------------------------
+    # TOP DECISIONS
+    # --------------------------------------------------------
+
     print()
     print("TOP DECISIONS")
-    print("-" * 78)
+    print("-" * 100)
 
     preview_columns = [
+
         "final_rank",
+
         "ticker",
-        "market_score",
+
+        "top20_score",
+
         "flow_score",
-        "market_component",
-        "flow_component",
-        "gex_component",
-        "structure_component",
-        "price_component",
-        "index_component",
+
+        "flow_direction",
+
+        "estimated_direction",
+
+        "direction_score",
+
+        "structure_score",
+
+        "price_score",
+
         "decision_score",
+
         "decision"
     ]
 
@@ -1798,6 +2760,10 @@ def main():
             index=False
         )
     )
+
+    # --------------------------------------------------------
+    # OUTPUT
+    # --------------------------------------------------------
 
     print()
     print(
@@ -1817,4 +2783,5 @@ def main():
 # ============================================================
 
 if __name__ == "__main__":
+
     main()
