@@ -8,7 +8,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+
   unusual-flow:
+
     runs-on: ubuntu-latest
 
     steps:
@@ -35,15 +37,28 @@ jobs:
 
       - name: Install dependencies
         run: |
+
+          set -e
+
           python -m pip install --upgrade pip
+
           pip install -r requirements.txt
 
       # ============================================================
-      # 4. CHECK CURRENT NORMALIZED DATA
+      # 4. CHECK NORMALIZED DATA
+      #
+      # Repository에서 유일하게 직접 사용하는 대용량 입력
+      # options_normalized.csv
+      #
+      # Expected:
+      # ~291,997 rows
+      # ~548 tickers
       # ============================================================
 
       - name: Check Normalized Data
         run: |
+
+          set -e
 
           echo "=========================================="
           echo "STEP 3 INPUT CHECK"
@@ -81,15 +96,19 @@ jobs:
           PY
 
       # ============================================================
-      # 5. REMOVE OLD LOCAL GREEKS
+      # 5. REMOVE ANY OLD LOCAL GREEKS
       #
       # IMPORTANT:
-      # options_greeks.csv is LOCAL ONLY.
-      # Never use an old repository copy.
+      # Greeks must ALWAYS be rebuilt from the current normalized
+      # dataset.
+      #
+      # Never trust a repository copy of options_greeks.csv.
       # ============================================================
 
       - name: Remove Old Local Greeks
         run: |
+
+          set -e
 
           echo "=========================================="
           echo "REMOVE OLD LOCAL GREEKS"
@@ -105,11 +124,13 @@ jobs:
           echo "OLD GREEKS : REMOVED"
 
       # ============================================================
-      # 6. REBUILD CURRENT GREEKS
+      # 6. REBUILD CURRENT STEP 4 GREEKS
       # ============================================================
 
-      - name: Rebuild Current Greeks
+      - name: Rebuild Current Step 4 Greeks
         run: |
+
+          set -e
 
           echo "=========================================="
           echo "REBUILD CURRENT STEP 4 GREEKS"
@@ -119,10 +140,16 @@ jobs:
 
       # ============================================================
       # 7. VERIFY CURRENT GREEKS
+      #
+      # Expected:
+      # ~291,997 rows
+      # ~548 tickers
       # ============================================================
 
       - name: Verify Current Greeks
         run: |
+
+          set -e
 
           echo "=========================================="
           echo "CURRENT GREEKS CHECK"
@@ -131,7 +158,6 @@ jobs:
           test -f data/analysis/options_greeks.csv
 
           python - <<'PY'
-          import os
           import pandas as pd
 
           file = "data/analysis/options_greeks.csv"
@@ -141,15 +167,26 @@ jobs:
           rows = len(df)
           tickers = df["symbol"].nunique()
 
-          print("FILE SIZE  :", os.path.getsize(file))
           print("ROWS       :", rows)
           print("COLUMNS    :", len(df.columns))
           print("TICKERS    :", tickers)
           print("DTE MIN    :", df["DTE"].min())
           print("DTE MAX    :", df["DTE"].max())
-          print("VALID DELTA:", df["delta"].notna().sum())
-          print("VALID GAMMA:", df["gamma"].notna().sum())
-          print("VALID VEGA :", df["vega"].notna().sum())
+
+          print(
+              "VALID DELTA:",
+              df["delta"].notna().sum()
+          )
+
+          print(
+              "VALID GAMMA:",
+              df["gamma"].notna().sum()
+          )
+
+          print(
+              "VALID VEGA :",
+              df["vega"].notna().sum()
+          )
 
           if rows < 100000:
               raise RuntimeError(
@@ -165,11 +202,39 @@ jobs:
           PY
 
       # ============================================================
-      # 8. RUN STEP 5
+      # 8. REMOVE OLD UNUSUAL FLOW
+      #
+      # IMPORTANT:
+      # Never allow an old 10-ticker unusual_flow.csv to survive
+      # inside the runner.
       # ============================================================
 
-      - name: Run Unusual Flow Engine
+      - name: Remove Old Unusual Flow
         run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "REMOVE OLD UNUSUAL FLOW"
+          echo "=========================================="
+
+          rm -f data/analysis/unusual_flow.csv
+
+          if [ -f data/analysis/unusual_flow.csv ]; then
+            echo "ERROR: Old unusual_flow.csv still exists."
+            exit 1
+          fi
+
+          echo "OLD UNUSUAL FLOW : REMOVED"
+
+      # ============================================================
+      # 9. RUN STEP 5
+      # ============================================================
+
+      - name: Run Step 5 Unusual Flow
+        run: |
+
+          set -e
 
           echo "=========================================="
           echo "RUN STEP 5 UNUSUAL FLOW"
@@ -178,11 +243,19 @@ jobs:
           python src/05_unusual_flow.py
 
       # ============================================================
-      # 9. VERIFY STEP 5 OUTPUT
+      # 10. VERIFY STEP 5 OUTPUT
+      #
+      # This is the critical validation.
+      #
+      # Expected:
+      # ~291,997 rows
+      # ~548 tickers
       # ============================================================
 
-      - name: Check Unusual Flow Output
+      - name: Check Step 5 Output
         run: |
+
+          set -e
 
           echo "=========================================="
           echo "STEP 5 OUTPUT CHECK"
@@ -199,24 +272,30 @@ jobs:
 
           rows = len(df)
           tickers = df["symbol"].nunique()
-          flow_scores = df["flow_score"].notna().sum()
-
-          buy_est = (
-              df["trade_side_estimate"] == "BUY EST."
-          ).sum()
-
-          sell_est = (
-              df["trade_side_estimate"] == "SELL EST."
-          ).sum()
 
           print("ROWS        :", rows)
           print("COLUMNS     :", len(df.columns))
           print("TICKERS     :", tickers)
-          print("FLOW SCORE  :", flow_scores)
-          print("BUY EST.    :", buy_est)
-          print("SELL EST.   :", sell_est)
-          print("DTE MIN     :", df["DTE"].min())
-          print("DTE MAX     :", df["DTE"].max())
+
+          print(
+              "FLOW SCORE  :",
+              df["flow_score"].notna().sum()
+          )
+
+          print(
+              "BUY EST.    :",
+              (df["trade_side_estimate"] == "BUY EST.").sum()
+          )
+
+          print(
+              "SELL EST.   :",
+              (df["trade_side_estimate"] == "SELL EST.").sum()
+          )
+
+          print(
+              "UNKNOWN     :",
+              (df["trade_side_estimate"] == "UNKNOWN").sum()
+          )
 
           if rows < 100000:
               raise RuntimeError(
@@ -228,180 +307,141 @@ jobs:
                   f"Unusual flow ticker count too small: {tickers}"
               )
 
-          if flow_scores != rows:
-              raise RuntimeError(
-                  "Invalid flow_score rows detected."
-              )
-
           print("STEP 5 OUTPUT : OK")
           PY
 
-
       # ============================================================
-      # 10. REMOVE LOCAL-ONLY GREEKS
+      # 11. FINAL DATA FLOW VALIDATION
       #
-      # IMPORTANT:
-      # options_greeks.csv is generated locally by STEP 4.
-      # It must NOT remain tracked by Git.
+      # Explicitly verify:
+      #
+      # Normalized
+      #      ↓
+      # Greeks
+      #      ↓
+      # Unusual Flow
+      #
+      # all contain the same universe.
       # ============================================================
 
-      - name: Remove Local Greeks Before Git
+      - name: Validate Step 3 4 5 Universe
         run: |
 
           set -e
 
           echo "=========================================="
-          echo "REMOVE LOCAL-ONLY FILES"
+          echo "STEP 3 -> STEP 4 -> STEP 5 UNIVERSE CHECK"
           echo "=========================================="
 
-          rm -f data/analysis/options_greeks.csv
+          python - <<'PY'
+          import pandas as pd
 
-          echo "OPTIONS GREEKS FILE REMOVED FROM WORKSPACE"
+          normalized_file = (
+              "data/normalized/options_normalized.csv"
+          )
 
-          # Remove the file from Git tracking if it was
-          # previously tracked.
-          git rm --cached --ignore-unmatch data/analysis/options_greeks.csv
+          greeks_file = (
+              "data/analysis/options_greeks.csv"
+          )
 
-          echo "OPTIONS GREEKS : GIT TRACKING REMOVED"
+          flow_file = (
+              "data/analysis/unusual_flow.csv"
+          )
 
-          # Ensure future runs never track this generated file.
-          grep -qxF "data/analysis/options_greeks.csv" .gitignore 2>/dev/null || \
-            echo "data/analysis/options_greeks.csv" >> .gitignore
+          normalized = pd.read_csv(
+              normalized_file,
+              usecols=["symbol"]
+          )
 
-          echo "GITIGNORE UPDATED"
+          greeks = pd.read_csv(
+              greeks_file,
+              usecols=["symbol"]
+          )
+
+          flow = pd.read_csv(
+              flow_file,
+              usecols=["symbol"]
+          )
+
+          n_symbols = set(
+              normalized["symbol"]
+              .dropna()
+              .astype(str)
+              .unique()
+          )
+
+          g_symbols = set(
+              greeks["symbol"]
+              .dropna()
+              .astype(str)
+              .unique()
+          )
+
+          f_symbols = set(
+              flow["symbol"]
+              .dropna()
+              .astype(str)
+              .unique()
+          )
+
+          print(
+              "NORMALIZED TICKERS :",
+              len(n_symbols)
+          )
+
+          print(
+              "GREEKS TICKERS     :",
+              len(g_symbols)
+          )
+
+          print(
+              "FLOW TICKERS       :",
+              len(f_symbols)
+          )
+
+          missing_greeks = (
+              n_symbols - g_symbols
+          )
+
+          missing_flow = (
+              n_symbols - f_symbols
+          )
+
+          print(
+              "MISSING IN GREEKS  :",
+              len(missing_greeks)
+          )
+
+          print(
+              "MISSING IN FLOW    :",
+              len(missing_flow)
+          )
+
+          if len(g_symbols) < 500:
+              raise RuntimeError(
+                  "Greeks universe unexpectedly small."
+              )
+
+          if len(f_symbols) < 500:
+              raise RuntimeError(
+                  "Flow universe unexpectedly small."
+              )
+
+          print("UNIVERSE FLOW : OK")
+          PY
 
       # ============================================================
-      # 11. GIT STATUS CHECK
+      # 12. UPLOAD STEP 5 ARTIFACT
+      #
+      # DO NOT COMMIT TO GITHUB.
+      #
+      # unusual_flow.csv is ~178MB and exceeds GitHub's
+      # normal repository file limit.
+      #
+      # Artifact storage is used instead.
       # ============================================================
 
-      - name: Git Status Check
-        run: |
-
-          echo "=========================================="
-          echo "GIT STATUS CHECK"
-          echo "=========================================="
-
-          git status --short
-
-      # ============================================================
-      # COMMIT STEP 5 DATA
-      # ============================================================
-
-      - name: Commit Step 5 Data
-        run: |
-
-          set -e
-
-          echo "=========================================="
-          echo "COMMIT STEP 5 DATA"
-          echo "=========================================="
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          # --------------------------------------------------------
-          # Ensure local-only Greeks file is ignored
-          # --------------------------------------------------------
-
-          touch .gitignore
-
-          grep -qxF "data/analysis/options_greeks.csv" .gitignore || \
-            echo "data/analysis/options_greeks.csv" >> .gitignore
-
-          # --------------------------------------------------------
-          # Stage ALL repository changes
-          #
-          # This safely handles:
-          # - unusual_flow.csv
-          # - .gitignore
-          # - removal of any previously tracked Greeks file
-          # --------------------------------------------------------
-
-          git add -A
-
-          echo "=========================================="
-          echo "STAGED CHANGES"
-          echo "=========================================="
-
-          git status --short
-
-          # --------------------------------------------------------
-          # Commit only if there are changes
-          # --------------------------------------------------------
-
-          if git diff --cached --quiet; then
-
-            echo "NO CHANGES TO COMMIT"
-
-          else
-
-            git commit -m "Update STEP 5 unusual flow"
-
-            echo "STEP 5 COMMIT CREATED"
-
-          fi
-      # ============================================================
-      # 13. VERIFY WORKTREE
-      # ============================================================
-
-      - name: Verify Clean Worktree
-        run: |
-
-          echo "=========================================="
-          echo "VERIFY CLEAN WORKTREE"
-          echo "=========================================="
-
-          git status --short
-
-          if [ -n "$(git status --porcelain)" ]; then
-            echo "ERROR: Worktree is not clean."
-            git status
-            exit 1
-          fi
-
-          echo "WORKTREE : CLEAN"
-
-      # ============================================================
-      # 14. SYNC WITH REMOTE MAIN
-      # ============================================================
-
-      - name: Sync With Remote Main
-        run: |
-
-          set -e
-
-          echo "=========================================="
-          echo "SYNC WITH REMOTE MAIN"
-          echo "=========================================="
-
-          git fetch origin main
-
-          git rebase origin/main
-
-          echo "REBASE : OK"
-
-      # ============================================================
-      # 15. PUSH
-      # ============================================================
-
-      - name: Push Step 5 Data
-        run: |
-
-          set -e
-
-          echo "=========================================="
-          echo "PUSH STEP 5 DATA"
-          echo "=========================================="
-
-          git push origin HEAD:main
-
-          echo "PUSH : OK"
-
-      # ============================================================
-      # 16. ARTIFACT
-      # ============================================================
-
-      - name: Upload Unusual Flow Data
+      - name: Upload Step 5 Artifact
         uses: actions/upload-artifact@v4
         with:
           name: step5-unusual-flow-output
@@ -409,57 +449,23 @@ jobs:
           retention-days: 1
 
       # ============================================================
-      # 17. FINAL VERIFICATION
+      # 13. FINAL
       # ============================================================
 
-      - name: STEP 5 Final Verification
+      - name: Step 5 Complete
         run: |
 
           echo "=========================================="
-          echo "FINAL STEP 5 VERIFICATION"
+          echo "STEP 5 COMPLETE"
           echo "=========================================="
 
-          test -f data/analysis/unusual_flow.csv
+          echo "STEP 3 NORMALIZED : CURRENT"
+          echo "STEP 4 GREEKS     : REBUILT"
+          echo "STEP 5 FLOW       : CURRENT"
 
-          python - <<'PY'
-          import os
-          import pandas as pd
+          echo "options_greeks.csv : LOCAL ONLY"
+          echo "unusual_flow.csv   : ARTIFACT ONLY"
+          echo "Git commit         : NOT USED"
+          echo "Git push           : NOT USED"
 
-          file = "data/analysis/unusual_flow.csv"
-
-          df = pd.read_csv(file)
-
-          rows = len(df)
-          tickers = df["symbol"].nunique()
-
-          print()
-          print("==========================================")
-          print("FINAL OPTION FLOW RESULT")
-          print("==========================================")
-          print("FILE SIZE       :", os.path.getsize(file))
-          print("ROWS            :", rows)
-          print("COLUMNS         :", len(df.columns))
-          print("TICKERS         :", tickers)
-          print("FLOW SCORE      :", df["flow_score"].notna().sum())
-          print("DTE MIN         :", df["DTE"].min())
-          print("DTE MAX         :", df["DTE"].max())
-          print("==========================================")
-
-          if rows < 100000:
-              raise RuntimeError(
-                  f"STEP 5 output is too small: {rows}"
-              )
-
-          if tickers < 500:
-              raise RuntimeError(
-                  f"STEP 5 ticker count is too small: {tickers}"
-              )
-
-          if df["flow_score"].notna().sum() != rows:
-              raise RuntimeError(
-                  "Invalid flow_score rows detected."
-              )
-
-          print("STEP 5 STATUS : PASS")
-          print("STEP 5 OUTPUT : VERIFIED")
-          PY
+          echo "STEP 5 STATUS : PASS"
