@@ -6,6 +6,10 @@ import numpy as np
 import pandas as pd
 
 
+# ============================================================
+# PATH
+# ============================================================
+
 BASE_DIR = Path(__file__).resolve().parents[1]
 
 GREEKS_FILE = (
@@ -29,6 +33,10 @@ OUTPUT_FILE = (
     / "structure.csv"
 )
 
+
+# ============================================================
+# HELPERS
+# ============================================================
 
 def numeric(series):
     return pd.to_numeric(
@@ -83,6 +91,7 @@ def normalize_option_type(series):
 def safe(value):
 
     try:
+
         value = float(value)
 
         if np.isfinite(value):
@@ -94,11 +103,15 @@ def safe(value):
     return np.nan
 
 
+# ============================================================
+# OPTION STRENGTH
+# ============================================================
+
 def calculate_strength(df):
 
-    gamma = df["gamma"].abs().fillna(0)
-    oi = df["open_interest"].fillna(0)
-    volume = df["volume"].fillna(0)
+    gamma = df["gamma"].abs().fillna(0.0)
+    oi = df["open_interest"].fillna(0.0)
+    volume = df["volume"].fillna(0.0)
 
     return (
         np.log1p(gamma * oi)
@@ -106,6 +119,10 @@ def calculate_strength(df):
         0.25 * np.log1p(volume)
     )
 
+
+# ============================================================
+# CALL / PUT WALL
+# ============================================================
 
 def choose_wall(
     df,
@@ -140,7 +157,6 @@ def choose_wall(
         / price
     )
 
-    # 너무 먼 strike가 wall이 되는 것을 방지
     side = side[
         side["distance"] <= 0.20
     ].copy()
@@ -148,8 +164,8 @@ def choose_wall(
     if side.empty:
         return np.nan
 
-    side["strength"] = (
-        calculate_strength(side)
+    side["strength"] = calculate_strength(
+        side
     )
 
     side["selection"] = (
@@ -160,7 +176,7 @@ def choose_wall(
         (
             1.0
             +
-            side["distance"] * 20
+            side["distance"] * 20.0
         )
     )
 
@@ -177,8 +193,30 @@ def choose_wall(
         .iloc[0]
     )
 
-    return safe(best["strike"])
+    return safe(
+        best["strike"]
+    )
 
+
+# ============================================================
+# GEX PROXY
+#
+# Gamma is calculated in STEP 4.
+#
+# GEX proxy:
+#
+# gamma
+# × open interest
+# × contract multiplier
+# × spot²
+# × 0.01
+#
+# CALL = positive
+# PUT  = negative
+#
+# This is a MODELLED GEX PROXY.
+# It is NOT exchange/dealer supplied GEX.
+# ============================================================
 
 def calculate_gex(
     df,
@@ -195,47 +233,65 @@ def calculate_gex(
         &
         side["open_interest"].notna()
         &
-        side["gamma"].ne(0)
+        side["gamma"].gt(0)
         &
         side["open_interest"].gt(0)
-    ]
+    ].copy()
 
     if side.empty:
         return np.nan
 
-    # 표준적인 단순 GEX proxy
-    #
-    # CALL : +
-    # PUT  : -
-    #
-    # contract multiplier = 100
-    #
-    # spot^2 scaling을 사용하되,
-    # 너무 큰 숫자가 의사결정에 직접 영향을 주지 않도록
-    # 구조에서는 부호/상대값 중심으로 사용한다.
+    if not np.isfinite(price) or price <= 0:
+        return np.nan
 
-    raw = (
-        side["gamma"]
-        *
-        side["open_interest"]
-        *
-        100.0
-        *
-        price
-        *
-        price
+    gamma = (
+        pd.to_numeric(
+            side["gamma"],
+            errors="coerce",
+        )
+        .fillna(0.0)
     )
 
-    value = raw.sum()
+    oi = (
+        pd.to_numeric(
+            side["open_interest"],
+            errors="coerce",
+        )
+        .fillna(0.0)
+        .clip(lower=0.0)
+    )
 
-    if option_type == "PUT":
-        value = -value
+    contract_multiplier = 100.0
+
+    # Standardized 1% underlying move scaling.
+    gex = (
+        gamma
+        *
+        oi
+        *
+        contract_multiplier
+        *
+        (price ** 2)
+        *
+        0.01
+    )
+
+    value = gex.sum()
 
     if not np.isfinite(value):
         return np.nan
 
-    return float(value)
+    value = float(value)
 
+    if option_type == "PUT":
+        value *= -1.0
+
+    return value
+
+
+# ============================================================
+# SUPPORT
+# ============================================================
 
 def choose_support(
     df,
@@ -262,8 +318,8 @@ def choose_support(
     if puts.empty:
         return np.nan
 
-    puts["strength"] = (
-        calculate_strength(puts)
+    puts["strength"] = calculate_strength(
+        puts
     )
 
     puts["score"] = (
@@ -272,21 +328,29 @@ def choose_support(
         3.0
         /
         (
-            1
+            1.0
             +
-            puts["distance"] * 20
+            puts["distance"] * 20.0
         )
     )
 
-    return safe(
+    best = (
         puts
         .sort_values(
             ["score", "strength"],
             ascending=False,
         )
-        .iloc[0]["strike"]
+        .iloc[0]
     )
 
+    return safe(
+        best["strike"]
+    )
+
+
+# ============================================================
+# RESISTANCE
+# ============================================================
 
 def choose_resistance(
     df,
@@ -313,8 +377,8 @@ def choose_resistance(
     if calls.empty:
         return np.nan
 
-    calls["strength"] = (
-        calculate_strength(calls)
+    calls["strength"] = calculate_strength(
+        calls
     )
 
     calls["score"] = (
@@ -323,21 +387,29 @@ def choose_resistance(
         3.0
         /
         (
-            1
+            1.0
             +
-            calls["distance"] * 20
+            calls["distance"] * 20.0
         )
     )
 
-    return safe(
+    best = (
         calls
         .sort_values(
             ["score", "strength"],
             ascending=False,
         )
-        .iloc[0]["strike"]
+        .iloc[0]
     )
 
+    return safe(
+        best["strike"]
+    )
+
+
+# ============================================================
+# WALL STRUCTURE
+# ============================================================
 
 def wall_structure(
     price,
@@ -350,7 +422,8 @@ def wall_structure(
 
     if (
         np.isfinite(call_wall)
-        and np.isfinite(put_wall)
+        and
+        np.isfinite(put_wall)
     ):
 
         if put_wall < call_wall:
@@ -383,6 +456,10 @@ def wall_structure(
     return "WALL UNAVAILABLE"
 
 
+# ============================================================
+# PRICE LOCATION
+# ============================================================
+
 def price_location(
     price,
     support,
@@ -398,13 +475,22 @@ def price_location(
         ) / price
 
         if 0 <= d <= 0.02:
-            result.append("NEAR SUPPORT")
+
+            result.append(
+                "NEAR SUPPORT"
+            )
 
         elif price > support:
-            result.append("ABOVE SUPPORT")
+
+            result.append(
+                "ABOVE SUPPORT"
+            )
 
         else:
-            result.append("BELOW SUPPORT")
+
+            result.append(
+                "BELOW SUPPORT"
+            )
 
     else:
 
@@ -419,14 +505,19 @@ def price_location(
         ) / price
 
         if 0 <= d <= 0.02:
-            result.append("NEAR RESISTANCE")
+
+            result.append(
+                "NEAR RESISTANCE"
+            )
 
         elif price < resistance:
+
             result.append(
                 "BELOW RESISTANCE"
             )
 
         else:
+
             result.append(
                 "ABOVE RESISTANCE"
             )
@@ -439,6 +530,28 @@ def price_location(
 
     return " | ".join(result)
 
+
+# ============================================================
+# GEX STRUCTURE
+# ============================================================
+
+def classify_gex(net_gex):
+
+    if not np.isfinite(net_gex):
+        return "GEX UNAVAILABLE"
+
+    if net_gex > 0:
+        return "POSITIVE GEX"
+
+    if net_gex < 0:
+        return "NEGATIVE GEX"
+
+    return "NEUTRAL GEX"
+
+
+# ============================================================
+# OVERALL STRUCTURE
+# ============================================================
 
 def classify_structure(
     price,
@@ -453,20 +566,26 @@ def classify_structure(
         put_wall,
     )
 
-    # 벽 자체로 방향성이 확인되는 경우
+    # First priority:
+    # actual price breaking a major wall.
+
     if wall in {
         "BULLISH BREAKOUT",
         "ABOVE CALL WALL",
     }:
+
         return "BULLISH"
 
     if wall in {
         "BEARISH BREAKDOWN",
         "BELOW PUT WALL",
     }:
+
         return "BEARISH"
 
-    # GEX가 실제로 계산된 경우만 사용
+    # Second priority:
+    # modelled GEX.
+
     if np.isfinite(net_gex):
 
         if net_gex > 0:
@@ -478,7 +597,23 @@ def classify_structure(
     return "NEUTRAL"
 
 
+# ============================================================
+# MAIN
+# ============================================================
+
 def main():
+
+    print(
+        "=========================================="
+    )
+
+    print(
+        "RUN STEP 8 STRUCTURE"
+    )
+
+    print(
+        "=========================================="
+    )
 
     if not GREEKS_FILE.exists():
         raise FileNotFoundError(
@@ -498,14 +633,21 @@ def main():
         TOP20_FILE
     )
 
+    # --------------------------------------------------------
+    # TOP20 SYMBOL
+    # --------------------------------------------------------
+
     ticker_col = find_col(
         top20,
-        ["ticker", "symbol"],
+        [
+            "ticker",
+            "symbol",
+        ],
     )
 
     if ticker_col is None:
         raise RuntimeError(
-            "TOP20 ticker column missing"
+            "TOP20 ticker/symbol column missing"
         )
 
     top_tickers = (
@@ -518,19 +660,32 @@ def main():
         .tolist()
     )
 
+    # --------------------------------------------------------
+    # GREEKS COLUMNS
+    # --------------------------------------------------------
+
     symbol_col = find_col(
         greeks,
-        ["symbol", "ticker"],
+        [
+            "symbol",
+            "ticker",
+        ],
     )
 
     type_col = find_col(
         greeks,
-        ["option_type", "type"],
+        [
+            "option_type",
+            "type",
+        ],
     )
 
     strike_col = find_col(
         greeks,
-        ["strike", "strike_price"],
+        [
+            "strike",
+            "strike_price",
+        ],
     )
 
     price_col = find_col(
@@ -544,17 +699,25 @@ def main():
 
     gamma_col = find_col(
         greeks,
-        ["gamma"],
+        [
+            "gamma",
+        ],
     )
 
     oi_col = find_col(
         greeks,
-        ["openInterest", "open_interest", "oi"],
+        [
+            "openInterest",
+            "open_interest",
+            "oi",
+        ],
     )
 
     volume_col = find_col(
         greeks,
-        ["volume"],
+        [
+            "volume",
+        ],
     )
 
     required = {
@@ -574,10 +737,16 @@ def main():
     ]
 
     if missing:
+
         raise RuntimeError(
             "STEP 8 missing columns: "
-            + ", ".join(missing)
+            +
+            ", ".join(missing)
         )
+
+    # --------------------------------------------------------
+    # INTERNAL STANDARDIZATION
+    # --------------------------------------------------------
 
     df = pd.DataFrame()
 
@@ -623,16 +792,25 @@ def main():
     )
 
     df = df[
-        df["ticker"].isin(top_tickers)
+        df["ticker"].isin(
+            top_tickers
+        )
         &
         df["option_type"].isin(
-            ["CALL", "PUT"]
+            [
+                "CALL",
+                "PUT",
+            ]
         )
         &
         df["strike"].notna()
         &
         df["current_price"].gt(0)
     ].copy()
+
+    # --------------------------------------------------------
+    # BUILD STRUCTURE
+    # --------------------------------------------------------
 
     rows = []
 
@@ -643,6 +821,7 @@ def main():
         ].copy()
 
         if group.empty:
+
             raise RuntimeError(
                 f"STEP 8 missing ticker: {ticker}"
             )
@@ -673,6 +852,10 @@ def main():
             price,
         )
 
+        # ----------------------------------------------------
+        # GEX
+        # ----------------------------------------------------
+
         call_gex = calculate_gex(
             group,
             "CALL",
@@ -687,15 +870,23 @@ def main():
 
         if (
             np.isfinite(call_gex)
-            and np.isfinite(put_gex)
+            and
+            np.isfinite(put_gex)
         ):
+
             net_gex = (
                 call_gex
                 +
                 put_gex
             )
+
         else:
+
             net_gex = np.nan
+
+        gex_structure = classify_gex(
+            net_gex
+        )
 
         structure = classify_structure(
             price,
@@ -704,95 +895,175 @@ def main():
             net_gex,
         )
 
-        if np.isfinite(net_gex):
-
-            if net_gex > 0:
-                gex_structure = (
-                    "POSITIVE GEX"
-                )
-            elif net_gex < 0:
-                gex_structure = (
-                    "NEGATIVE GEX"
-                )
-            else:
-                gex_structure = (
-                    "NEUTRAL GEX"
-                )
-
-        else:
-
-            gex_structure = (
-                "GEX UNAVAILABLE"
-            )
+        wall = wall_structure(
+            price,
+            call_wall,
+            put_wall,
+        )
 
         rows.append(
             {
                 "ticker": ticker,
+
                 "current_price": price,
+
                 "call_wall": call_wall,
                 "put_wall": put_wall,
+
                 "support": support,
                 "resistance": resistance,
+
                 "call_gex": call_gex,
                 "put_gex": put_gex,
                 "net_gex": net_gex,
+
                 "structure": structure,
+
                 "price_location": price_location(
                     price,
                     support,
                     resistance,
                 ),
+
                 "gex_structure": gex_structure,
-                "wall_structure": wall_structure(
-                    price,
-                    call_wall,
-                    put_wall,
+
+                "wall_structure": wall,
+
+                "data_source": (
+                    "STEP4_GAMMA_OI_GEX_PROXY"
                 ),
-                "data_source": "CALCULATED",
             }
         )
 
-    output = pd.DataFrame(rows)
+    output = pd.DataFrame(
+        rows
+    )
+
+    # --------------------------------------------------------
+    # VALIDATION
+    # --------------------------------------------------------
 
     if len(output) != 20:
         raise RuntimeError(
-            "STEP 8 must produce exactly 20 rows"
+            "STEP 8 must contain exactly 20 rows"
         )
 
     if output["ticker"].nunique() != 20:
         raise RuntimeError(
-            "STEP 8 duplicate ticker"
+            "STEP 8 must contain 20 unique tickers"
         )
+
+    if output["call_wall"].notna().sum() != 20:
+        raise RuntimeError(
+            "STEP 8 CALL WALL incomplete"
+        )
+
+    if output["put_wall"].notna().sum() != 20:
+        raise RuntimeError(
+            "STEP 8 PUT WALL incomplete"
+        )
+
+    valid_gex = (
+        output["net_gex"]
+        .notna()
+        .sum()
+    )
+
+    # --------------------------------------------------------
+    # SAVE
+    # --------------------------------------------------------
+
+    OUTPUT_FILE.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
 
     output.to_csv(
         OUTPUT_FILE,
         index=False,
     )
 
+    # --------------------------------------------------------
+    # OUTPUT
+    # --------------------------------------------------------
+
     print()
-    print("STEP 8 COMPLETE")
-    print("ROWS       :", len(output))
     print(
-        "TICKERS    :",
-        output["ticker"].nunique(),
+        "=========================================="
     )
     print(
-        "CALL WALL  :",
-        output["call_wall"].notna().sum(),
+        "STEP 8 STRUCTURE"
     )
     print(
-        "PUT WALL   :",
-        output["put_wall"].notna().sum(),
+        "=========================================="
     )
+
     print(
-        "NET GEX    :",
-        output["net_gex"].notna().sum(),
+        f"ROWS       : {len(output)}"
     )
+
     print(
-        "STRUCTURE  :",
-        output["structure"].notna().sum(),
+        f"TICKERS    : "
+        f"{output['ticker'].nunique()}"
     )
-    print("STEP 8 OUTPUT : OK")
+
+    print(
+        f"CALL WALL  : "
+        f"{output['call_wall'].notna().sum()}"
+    )
+
+    print(
+        f"PUT WALL   : "
+        f"{output['put_wall'].notna().sum()}"
+    )
+
+    print(
+        f"NET GEX    : "
+        f"{valid_gex}"
+    )
+
+    print(
+        f"POSITIVE GEX: "
+        f"{(output['net_gex'] > 0).sum()}"
+    )
+
+    print(
+        f"NEGATIVE GEX: "
+        f"{(output['net_gex'] < 0).sum()}"
+    )
+
+    print(
+        f"GEX UNAVAILABLE: "
+        f"{output['net_gex'].isna().sum()}"
+    )
+
+    print(
+        f"STRUCTURE  : "
+        f"{output['structure'].notna().sum()}"
+    )
+
+    print()
+    print(
+        output[
+            [
+                "ticker",
+                "call_gex",
+                "put_gex",
+                "net_gex",
+                "gex_structure",
+                "structure",
+            ]
+        ].to_string(index=False)
+    )
+
+    print()
+    print(
+        f"OUTPUT FILE : {OUTPUT_FILE}"
+    )
+
+    print(
+        "STEP 8 OUTPUT : OK"
+    )
 
 
 if __name__ == "__main__":
