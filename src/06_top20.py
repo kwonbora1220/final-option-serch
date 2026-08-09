@@ -1,5 +1,5 @@
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
@@ -15,7 +15,7 @@ OUTPUT_DIR = "data/analysis"
 
 OUTPUT_FILE = os.path.join(
     OUTPUT_DIR,
-    "top20.csv"
+    "top20.csv",
 )
 
 TOP_N = 20
@@ -27,7 +27,9 @@ TOP_N = 20
 
 def log(message):
 
-    now = datetime.utcnow().strftime(
+    now = datetime.now(
+        timezone.utc
+    ).strftime(
         "%Y-%m-%d %H:%M:%S UTC"
     )
 
@@ -56,7 +58,9 @@ def percentile_score(series):
 
     series = numeric(series)
 
-    if series.notna().sum() <= 1:
+    valid = series.notna().sum()
+
+    if valid <= 1:
 
         return pd.Series(
             0.5,
@@ -100,8 +104,16 @@ def main():
 
     input_rows = len(df)
 
+    input_tickers = df[
+        "symbol"
+    ].nunique()
+
     log(
         f"INPUT ROWS : {input_rows:,}"
+    )
+
+    log(
+        f"INPUT TICKERS : {input_tickers:,}"
     )
 
     # --------------------------------------------------------
@@ -109,6 +121,7 @@ def main():
     # --------------------------------------------------------
 
     required_columns = [
+
         "symbol",
         "option_type",
         "volume",
@@ -117,13 +130,17 @@ def main():
         "estimated_traded_premium",
         "flow_score",
         "trade_side_estimate",
-        "call_put_premium_imbalance",
+
     ]
 
     missing = [
+
         column
+
         for column in required_columns
+
         if column not in df.columns
+
     ]
 
     if missing:
@@ -134,16 +151,17 @@ def main():
         )
 
     # --------------------------------------------------------
-    # NUMERIC
+    # NUMERIC CONVERSION
     # --------------------------------------------------------
 
     numeric_columns = [
+
         "volume",
         "openInterest",
         "DTE",
         "estimated_traded_premium",
         "flow_score",
-        "call_put_premium_imbalance",
+
     ]
 
     for column in numeric_columns:
@@ -153,7 +171,18 @@ def main():
         )
 
     # --------------------------------------------------------
-    # SYMBOL GROUPING
+    # NORMALIZE SYMBOL
+    # --------------------------------------------------------
+
+    df["symbol"] = (
+        df["symbol"]
+        .astype(str)
+        .str.strip()
+        .str.upper()
+    )
+
+    # --------------------------------------------------------
+    # BUILD SYMBOL LEVEL FLOW
     # --------------------------------------------------------
 
     log(
@@ -164,139 +193,74 @@ def main():
 
     for symbol, group in df.groupby(
         "symbol",
-        dropna=False
+        dropna=True
     ):
+
+        if not symbol or symbol == "NAN":
+            continue
+
+        # ----------------------------------------------------
+        # TOTALS
+        # ----------------------------------------------------
 
         total_volume = group[
             "volume"
-        ].sum()
+        ].fillna(0).sum()
 
         total_premium = group[
             "estimated_traded_premium"
-        ].sum()
+        ].fillna(0).sum()
+
+        # ----------------------------------------------------
+        # CALL / PUT
+        # ----------------------------------------------------
 
         call_group = group[
-            group["option_type"] == "CALL"
+            group["option_type"]
+            .astype(str)
+            .str.upper()
+            .str.strip()
+            == "CALL"
         ]
 
         put_group = group[
-            group["option_type"] == "PUT"
+            group["option_type"]
+            .astype(str)
+            .str.upper()
+            .str.strip()
+            == "PUT"
         ]
 
         call_premium = call_group[
             "estimated_traded_premium"
-        ].sum()
+        ].fillna(0).sum()
 
         put_premium = put_group[
             "estimated_traded_premium"
-        ].sum()
-
-        # ----------------------------------------------------
-        # BUY / SELL ESTIMATE
-        # ----------------------------------------------------
-
-        buy_group = group[
-            group[
-                "trade_side_estimate"
-            ] == "BUY EST."
-        ]
-
-        sell_group = group[
-            group[
-                "trade_side_estimate"
-            ] == "SELL EST."
-        ]
-
-        buy_premium = buy_group[
-            "estimated_traded_premium"
-        ].sum()
-
-        sell_premium = sell_group[
-            "estimated_traded_premium"
-        ].sum()
-
-        # ----------------------------------------------------
-        # VOLUME / OI
-        # ----------------------------------------------------
-
-        volume_oi = np.where(
-
-            group["openInterest"] > 0,
-
-            group["volume"]
-            / group["openInterest"],
-
-            np.nan
-        )
-
-        max_volume_oi = (
-            np.nanmax(volume_oi)
-            if np.isfinite(
-                volume_oi
-            ).any()
-            else 0.0
-        )
-
-        avg_volume_oi = (
-            np.nanmean(volume_oi)
-            if np.isfinite(
-                volume_oi
-            ).any()
-            else 0.0
-        )
-
-        # ----------------------------------------------------
-        # FLOW SCORE
-        # ----------------------------------------------------
-
-        max_flow_score = group[
-            "flow_score"
-        ].max()
-
-        avg_flow_score = group[
-            "flow_score"
-        ].mean()
-
-        # ----------------------------------------------------
-        # TOP OPTION
-        # ----------------------------------------------------
-
-        top_option = group.sort_values(
-            "flow_score",
-            ascending=False
-        ).iloc[0]
-
-        # ----------------------------------------------------
-        # DTE
-        # ----------------------------------------------------
-
-        top_dte = top_option[
-            "DTE"
-        ]
+        ].fillna(0).sum()
 
         # ----------------------------------------------------
         # CALL / PUT IMBALANCE
         # ----------------------------------------------------
 
-        if (
+        cp_total = (
             call_premium
             + put_premium
-        ) > 0:
+        )
+
+        if cp_total > 0:
 
             cp_imbalance = (
                 call_premium
                 - put_premium
-            ) / (
-                call_premium
-                + put_premium
-            )
+            ) / cp_total
 
         else:
 
             cp_imbalance = 0.0
 
         # ----------------------------------------------------
-        # DIRECTION
+        # FLOW DIRECTION
         # ----------------------------------------------------
 
         if cp_imbalance >= 0.25:
@@ -318,27 +282,42 @@ def main():
             )
 
         # ----------------------------------------------------
-        # BUY / SELL DIRECTION
+        # BUY / SELL ESTIMATE
         # ----------------------------------------------------
 
-        directional_premium = (
-            buy_premium
-            - sell_premium
-        )
+        buy_group = group[
+            group[
+                "trade_side_estimate"
+            ]
+            == "BUY EST."
+        ]
 
-        if (
+        sell_group = group[
+            group[
+                "trade_side_estimate"
+            ]
+            == "SELL EST."
+        ]
+
+        buy_premium = buy_group[
+            "estimated_traded_premium"
+        ].fillna(0).sum()
+
+        sell_premium = sell_group[
+            "estimated_traded_premium"
+        ].fillna(0).sum()
+
+        directional_total = (
             buy_premium
             + sell_premium
-        ) > 0:
+        )
+
+        if directional_total > 0:
 
             directional_ratio = (
-                directional_premium
-                /
-                (
-                    buy_premium
-                    + sell_premium
-                )
-            )
+                buy_premium
+                - sell_premium
+            ) / directional_total
 
         else:
 
@@ -363,46 +342,194 @@ def main():
             )
 
         # ----------------------------------------------------
-        # TOP OPTIONS
+        # VOLUME / OI
         # ----------------------------------------------------
 
-        top_calls = group[
-            group["option_type"] == "CALL"
-        ].sort_values(
-            "flow_score",
-            ascending=False
-        ).head(3)
+        volume_oi = np.where(
 
-        top_puts = group[
-            group["option_type"] == "PUT"
-        ].sort_values(
-            "flow_score",
-            ascending=False
-        ).head(3)
+            group["openInterest"] > 0,
+
+            group["volume"]
+            / group["openInterest"],
+
+            np.nan
+
+        )
+
+        finite_volume_oi = (
+            volume_oi[
+                np.isfinite(volume_oi)
+            ]
+        )
+
+        if len(finite_volume_oi) > 0:
+
+            max_volume_oi = float(
+                np.nanmax(
+                    finite_volume_oi
+                )
+            )
+
+            avg_volume_oi = float(
+                np.nanmean(
+                    finite_volume_oi
+                )
+            )
+
+        else:
+
+            max_volume_oi = 0.0
+            avg_volume_oi = 0.0
+
+        # ----------------------------------------------------
+        # FLOW SCORE
+        # ----------------------------------------------------
+
+        max_flow_score = group[
+            "flow_score"
+        ].max()
+
+        avg_flow_score = group[
+            "flow_score"
+        ].mean()
+
+        if pd.isna(max_flow_score):
+            max_flow_score = 0.0
+
+        if pd.isna(avg_flow_score):
+            avg_flow_score = 0.0
+
+        # ----------------------------------------------------
+        # TOP OPTION
+        # ----------------------------------------------------
+
+        valid_flow = group[
+            group["flow_score"].notna()
+        ]
+
+        if valid_flow.empty:
+
+            top_option = group.iloc[0]
+
+        else:
+
+            top_option = (
+                valid_flow
+                .sort_values(
+                    "flow_score",
+                    ascending=False
+                )
+                .iloc[0]
+            )
+
+        top_dte = top_option[
+            "DTE"
+        ]
+
+        # ----------------------------------------------------
+        # TOP CALLS
+        # ----------------------------------------------------
+
+        top_calls = (
+            call_group
+            .sort_values(
+                "flow_score",
+                ascending=False
+            )
+            .head(3)
+        )
+
+        # ----------------------------------------------------
+        # TOP PUTS
+        # ----------------------------------------------------
+
+        top_puts = (
+            put_group
+            .sort_values(
+                "flow_score",
+                ascending=False
+            )
+            .head(3)
+        )
+
+        # ----------------------------------------------------
+        # OPTION TEXT
+        # ----------------------------------------------------
 
         def option_text(row):
 
+            strike = pd.to_numeric(
+                row.get(
+                    "strike",
+                    np.nan
+                ),
+                errors="coerce"
+            )
+
+            dte = pd.to_numeric(
+                row.get(
+                    "DTE",
+                    np.nan
+                ),
+                errors="coerce"
+            )
+
+            score = pd.to_numeric(
+                row.get(
+                    "flow_score",
+                    np.nan
+                ),
+                errors="coerce"
+            )
+
+            if pd.isna(strike):
+                strike_text = "N/A"
+            else:
+                strike_text = (
+                    f"${strike:.2f}"
+                )
+
+            if pd.isna(dte):
+                dte_text = "N/A"
+            else:
+                dte_text = str(
+                    int(dte)
+                )
+
+            if pd.isna(score):
+                score_text = "N/A"
+            else:
+                score_text = (
+                    f"{score:.1f}"
+                )
+
             return (
-                f"{row['option_type']} "
-                f"${row['strike']:.2f} "
-                f"DTE {int(row['DTE'])} "
-                f"Score {row['flow_score']:.1f}"
+                f"{str(row['option_type']).upper()} "
+                f"{strike_text} "
+                f"DTE {dte_text} "
+                f"Score {score_text}"
             )
 
         top_call_text = " / ".join(
+
             option_text(row)
+
             for _, row
             in top_calls.iterrows()
+
         )
 
         top_put_text = " / ".join(
+
             option_text(row)
+
             for _, row
             in top_puts.iterrows()
+
         )
 
         # ----------------------------------------------------
-        # REASON
+        # SELECTION REASON
         # ----------------------------------------------------
 
         reasons = []
@@ -472,12 +599,15 @@ def main():
         )
 
         # ----------------------------------------------------
-        # SAVE
+        # APPEND
         # ----------------------------------------------------
 
         grouped.append(
+
             {
-                "symbol": symbol,
+
+                "symbol":
+                    symbol,
 
                 "option_count":
                     len(group),
@@ -535,11 +665,13 @@ def main():
 
                 "selection_reason":
                     selection_reason,
+
             }
+
         )
 
     # --------------------------------------------------------
-    # DATAFRAME
+    # SYMBOL DATAFRAME
     # --------------------------------------------------------
 
     result = pd.DataFrame(
@@ -552,13 +684,18 @@ def main():
             "No symbol-level flow data generated."
         )
 
+    log(
+        f"SYMBOLS GENERATED : {len(result):,}"
+    )
+
     # --------------------------------------------------------
-    # SYMBOL SCORE
+    # SCORE COMPONENTS
     # --------------------------------------------------------
 
     result[
         "premium_score"
     ] = percentile_score(
+
         np.log1p(
             result[
                 "total_premium"
@@ -566,11 +703,13 @@ def main():
                 lower=0
             )
         )
+
     )
 
     result[
         "volume_score"
     ] = percentile_score(
+
         np.log1p(
             result[
                 "total_volume"
@@ -578,19 +717,23 @@ def main():
                 lower=0
             )
         )
+
     )
 
     result[
         "flow_score_score"
     ] = percentile_score(
+
         result[
             "max_flow_score"
         ]
+
     )
 
     result[
         "volume_oi_score"
     ] = percentile_score(
+
         np.log1p(
             result[
                 "max_volume_oi"
@@ -598,11 +741,13 @@ def main():
                 lower=0
             )
         )
+
     )
 
     result[
         "imbalance_score"
     ] = (
+
         result[
             "call_put_imbalance"
         ]
@@ -611,10 +756,11 @@ def main():
             lower=0,
             upper=1
         )
+
     )
 
     # --------------------------------------------------------
-    # FINAL SYMBOL SCORE
+    # FINAL TOP20 SCORE
     # --------------------------------------------------------
 
     result[
@@ -625,36 +771,52 @@ def main():
             "premium_score"
         ] * 35
 
-        + result[
+        +
+
+        result[
             "volume_score"
         ] * 15
 
-        + result[
+        +
+
+        result[
             "flow_score_score"
         ] * 30
 
-        + result[
+        +
+
+        result[
             "volume_oi_score"
         ] * 10
 
-        + result[
+        +
+
+        result[
             "imbalance_score"
         ] * 10
+
     )
 
     # --------------------------------------------------------
     # SORT
     # --------------------------------------------------------
 
-    result = result.sort_values(
-        [
-            "top20_score",
-            "max_flow_score",
-            "total_premium",
-        ],
-        ascending=False
-    ).reset_index(
-        drop=True
+    result = (
+        result
+        .sort_values(
+
+            [
+                "top20_score",
+                "max_flow_score",
+                "total_premium",
+            ],
+
+            ascending=False
+
+        )
+        .reset_index(
+            drop=True
+        )
     )
 
     # --------------------------------------------------------
@@ -665,11 +827,18 @@ def main():
         TOP_N
     ).copy()
 
+    if len(top20) < TOP_N:
+
+        raise RuntimeError(
+            f"Only {len(top20)} symbols available. "
+            f"Cannot build TOP {TOP_N}."
+        )
+
     top20[
         "rank"
     ] = np.arange(
         1,
-        len(top20) + 1
+        TOP_N + 1
     )
 
     # --------------------------------------------------------
@@ -677,27 +846,38 @@ def main():
     # --------------------------------------------------------
 
     columns = [
+
         "rank",
         "symbol",
         "top20_score",
         "max_flow_score",
         "avg_flow_score",
+
         "total_volume",
         "total_premium",
+
         "call_premium",
         "put_premium",
         "call_put_imbalance",
+
         "max_volume_oi",
         "avg_volume_oi",
+
         "buy_premium_est",
         "sell_premium_est",
+
         "directional_ratio",
+
         "flow_direction",
         "estimated_direction",
+
         "top_dte",
+
         "top_call_options",
         "top_put_options",
+
         "selection_reason",
+
     ]
 
     top20 = top20[
@@ -743,7 +923,12 @@ def main():
 
     print(
         f"INPUT TICKERS    : "
-        f"{df['symbol'].nunique():,}"
+        f"{input_tickers:,}"
+    )
+
+    print(
+        f"SYMBOLS ANALYZED : "
+        f"{len(result):,}"
     )
 
     print(
@@ -760,6 +945,10 @@ def main():
         "=" * 72
     )
 
+    # --------------------------------------------------------
+    # TOP 20 DISPLAY
+    # --------------------------------------------------------
+
     print(
         "🔥 TOP 20 UNUSUAL OPTION FLOW"
     )
@@ -769,6 +958,7 @@ def main():
     )
 
     display_columns = [
+
         "rank",
         "symbol",
         "top20_score",
@@ -777,14 +967,17 @@ def main():
         "call_put_imbalance",
         "max_volume_oi",
         "estimated_direction",
+
     ]
 
     print(
+
         top20[
             display_columns
         ].to_string(
             index=False
         )
+
     )
 
     print(
@@ -802,26 +995,48 @@ def main():
     for _, row in top20.iterrows():
 
         print(
+
             f"{int(row['rank']):02d}. "
             f"{row['symbol']} → "
             f"{row['selection_reason']}"
+
         )
 
     print(
         "=" * 72
     )
 
-    if len(top20) > 0:
+    # --------------------------------------------------------
+    # FINAL CHECKS
+    # --------------------------------------------------------
 
-        print(
-            "TOP20 CHECK      : OK"
-        )
-
-    else:
+    if len(top20) != TOP_N:
 
         raise RuntimeError(
             "TOP20 selection failed."
         )
+
+    if top20[
+        "symbol"
+    ].nunique() != TOP_N:
+
+        raise RuntimeError(
+            "TOP20 contains duplicate symbols."
+        )
+
+    if list(
+        top20["rank"]
+    ) != list(
+        range(1, TOP_N + 1)
+    ):
+
+        raise RuntimeError(
+            "TOP20 rank validation failed."
+        )
+
+    print(
+        "TOP20 CHECK      : OK"
+    )
 
     print(
         "=" * 72
