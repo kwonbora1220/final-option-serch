@@ -156,12 +156,15 @@ def load_market():
     )
 
     if score_col is None:
+
         raise RuntimeError(
             "market_score missing"
         )
 
     score = numeric(
-        df.iloc[-1][score_col]
+        df.iloc[-1][
+            score_col
+        ]
     )
 
     regime_col = find_col(
@@ -174,10 +177,13 @@ def load_market():
 
     regime = (
         text(
-            df.iloc[-1][regime_col]
+            df.iloc[-1][
+                regime_col
+            ]
         )
         if regime_col
-        else "UNKNOWN"
+        else
+        "UNKNOWN"
     )
 
     directions = {}
@@ -195,16 +201,25 @@ def load_market():
         )
 
         directions[name] = (
+
             text(
                 df.iloc[-1][col]
             )
+
             if col
-            else "UNAVAILABLE"
+
+            else
+
+            "UNAVAILABLE"
         )
 
     return {
-        "market_score": clamp(score),
+        "market_score": clamp(
+            score
+        ),
+
         "market_regime": regime,
+
         **directions,
     }
 
@@ -228,6 +243,7 @@ def load_top20():
     )
 
     if ticker_col is None:
+
         raise RuntimeError(
             "TOP20 ticker missing"
         )
@@ -240,13 +256,17 @@ def load_top20():
     )
 
     numeric_fields = [
+
         "top20_score",
         "max_flow_score",
         "avg_flow_score",
+
         "total_volume",
         "total_premium",
+
         "call_premium",
         "put_premium",
+
         "call_put_imbalance",
         "directional_ratio",
         "top_dte",
@@ -271,6 +291,7 @@ def load_top20():
             df[field] = np.nan
 
     text_fields = [
+
         "flow_direction",
         "estimated_direction",
     ]
@@ -333,6 +354,7 @@ def load_flow():
     )
 
     if ticker_col is None:
+
         raise RuntimeError(
             "FLOW ticker missing"
         )
@@ -346,9 +368,11 @@ def load_flow():
 
     if score_col:
 
-        df["flow_value"] = pd.to_numeric(
-            df[score_col],
-            errors="coerce",
+        df["flow_value"] = (
+            pd.to_numeric(
+                df[score_col],
+                errors="coerce",
+            )
         )
 
     else:
@@ -389,6 +413,7 @@ def load_structure():
     )
 
     if ticker_col is None:
+
         raise RuntimeError(
             "STRUCTURE ticker missing"
         )
@@ -401,11 +426,15 @@ def load_structure():
     )
 
     numeric_fields = [
+
         "current_price",
+
         "call_wall",
         "put_wall",
+
         "support",
         "resistance",
+
         "call_gex",
         "put_gex",
         "net_gex",
@@ -430,6 +459,7 @@ def load_structure():
             df[field] = np.nan
 
     text_fields = [
+
         "structure",
         "price_location",
         "gex_structure",
@@ -472,22 +502,36 @@ def load_structure():
 def direction_score(row):
 
     direction = text(
-        row["estimated_direction"]
+        row[
+            "estimated_direction"
+        ]
     )
 
     flow_direction = text(
-        row["flow_direction"]
+        row[
+            "flow_direction"
+        ]
     )
 
     ratio = numeric(
-        row["directional_ratio"]
+        row[
+            "directional_ratio"
+        ]
     )
 
     if "BUY" in direction:
 
         base = 80.0
 
+    elif "BULL" in direction:
+
+        base = 80.0
+
     elif "SELL" in direction:
+
+        base = 20.0
+
+    elif "BEAR" in direction:
 
         base = 20.0
 
@@ -518,18 +562,103 @@ def direction_score(row):
 
         base += 5.0
 
-    if (
+    elif (
         "PUT DOMINANT"
         in flow_direction
     ):
 
         base -= 5.0
 
-    return clamp(base)
+    return clamp(
+        base
+    )
 
 
 # ============================================================
-# STRUCTURE SCORE
+# GEX STRENGTH
+#
+# This is the important improvement.
+#
+# We do NOT simply use:
+#
+# positive = 70
+# negative = 30
+#
+# Instead:
+#
+# GEX BIAS =
+#
+# NET GEX
+# /
+# (ABS(CALL GEX) + ABS(PUT GEX))
+#
+# This gives a normalized -1 ~ +1 measure.
+#
+# +1 = strongly call-heavy
+#  0 = balanced
+# -1 = strongly put-heavy
+#
+# Then convert to 0 ~ 100.
+# ============================================================
+
+def calculate_gex_strength(row):
+
+    call_gex = numeric(
+        row["call_gex"]
+    )
+
+    put_gex = numeric(
+        row["put_gex"]
+    )
+
+    net_gex = numeric(
+        row["net_gex"]
+    )
+
+    if not all(
+        np.isfinite(v)
+        for v in [
+            call_gex,
+            put_gex,
+            net_gex,
+        ]
+    ):
+
+        return 50.0
+
+    denominator = (
+        abs(call_gex)
+        +
+        abs(put_gex)
+    )
+
+    if denominator <= 0:
+
+        return 50.0
+
+    bias = (
+        net_gex
+        /
+        denominator
+    )
+
+    bias = max(
+        -1.0,
+        min(
+            1.0,
+            bias,
+        ),
+    )
+
+    return (
+        50.0
+        +
+        bias * 50.0
+    )
+
+
+# ============================================================
+# GEX STRUCTURE SCORE
 # ============================================================
 
 def structure_score(row):
@@ -552,29 +681,53 @@ def structure_score(row):
 
     if structure == "BULLISH":
 
-        score = 85.0
+        base = 82.0
 
     elif structure == "BEARISH":
 
-        score = 20.0
+        base = 22.0
 
     elif (
         "POSITIVE GEX STRUCTURE"
         in structure
     ):
 
-        score = 65.0
+        base = 65.0
 
     elif (
         "NEGATIVE GEX STRUCTURE"
         in structure
     ):
 
-        score = 35.0
+        base = 35.0
 
     else:
 
-        score = 50.0
+        base = 50.0
+
+    # --------------------------------------------------------
+    # GEX INTENSITY
+    # --------------------------------------------------------
+
+    gex_strength = (
+        calculate_gex_strength(
+            row
+        )
+    )
+
+    # GEX contribution:
+    #
+    # 50 = neutral
+    # 100 = extremely positive
+    #   0 = extremely negative
+    #
+    # Blend rather than blindly add 5 points.
+
+    base = (
+        base * 0.65
+        +
+        gex_strength * 0.35
+    )
 
     # --------------------------------------------------------
     # WALL
@@ -582,46 +735,34 @@ def structure_score(row):
 
     if wall == "BULLISH BREAKOUT":
 
-        score += 10.0
+        base += 8.0
 
     elif wall == "ABOVE CALL WALL":
 
-        score += 7.0
+        base += 5.0
 
     elif wall == "BEARISH BREAKDOWN":
 
-        score -= 10.0
+        base -= 8.0
 
     elif wall == "BELOW PUT WALL":
 
-        score -= 7.0
+        base -= 5.0
 
     # --------------------------------------------------------
-    # GEX
+    # EXPLICIT GEX DIRECTION
     # --------------------------------------------------------
 
     if gex == "POSITIVE GEX":
 
-        score += 5.0
+        base += 2.0
 
     elif gex == "NEGATIVE GEX":
 
-        score -= 5.0
-
-    # --------------------------------------------------------
-    # RANGE / SINGLE WALL
-    # --------------------------------------------------------
-
-    if wall == "RANGE":
-
-        score += 0.0
-
-    elif wall == "SINGLE WALL":
-
-        score += 0.0
+        base -= 2.0
 
     return clamp(
-        score
+        base
     )
 
 
@@ -663,6 +804,10 @@ def price_score(row):
 
             score += 5.0
 
+        else:
+
+            score -= 10.0
+
     if np.isfinite(resistance):
 
         d = (
@@ -677,6 +822,10 @@ def price_score(row):
 
             score += 4.0
 
+        else:
+
+            score -= 8.0
+
     return clamp(
         score
     )
@@ -689,10 +838,22 @@ def price_score(row):
 def index_score(market):
 
     values = [
-        market["ndx_direction"],
-        market["spy_direction"],
-        market["soxx_direction"],
-        market["dia_direction"],
+
+        market[
+            "ndx_direction"
+        ],
+
+        market[
+            "spy_direction"
+        ],
+
+        market[
+            "soxx_direction"
+        ],
+
+        market[
+            "dia_direction"
+        ],
     ]
 
     bull = sum(
@@ -756,17 +917,14 @@ def final_decision(
         structure
     )
 
-    # Very weak directional signal.
     if direction < 30:
 
         return "🟡 관망"
 
-    # Explicit bearish structure.
     if structure == "BEARISH":
 
         return "🔴 회피"
 
-    # Weak market.
     if market_score < 45:
 
         if (
@@ -779,7 +937,6 @@ def final_decision(
 
         return "🔴 회피"
 
-    # Normal market.
     if (
         score >= 75
         and
@@ -803,15 +960,17 @@ def main():
 
     log("START")
 
-    # --------------------------------------------------------
+    # ========================================================
     # INPUT CHECK
-    # --------------------------------------------------------
+    # ========================================================
 
     for path in [
+
         MARKET_FILE,
         FLOW_FILE,
         TOP20_FILE,
         STRUCTURE_FILE,
+
     ]:
 
         if not os.path.exists(path):
@@ -829,7 +988,9 @@ def main():
     structure = load_structure()
 
     market_component = (
-        market["market_score"]
+        market[
+            "market_score"
+        ]
     )
 
     (
@@ -843,30 +1004,38 @@ def main():
 
     rows = []
 
-    # --------------------------------------------------------
-    # DECISION
-    # --------------------------------------------------------
+    # ========================================================
+    # DECISION LOOP
+    # ========================================================
 
     for rank, top in enumerate(
+
         top20.to_dict(
             "records"
         ),
+
         start=1,
     ):
 
-        ticker = top["ticker"]
+        ticker = top[
+            "ticker"
+        ]
 
         flow_row = flow[
-            flow["ticker"] == ticker
+            flow["ticker"]
+            ==
+            ticker
         ]
 
         structure_row = structure[
-            structure["ticker"] == ticker
+            structure["ticker"]
+            ==
+            ticker
         ]
 
-        # ----------------------------------------------------
+        # ====================================================
         # FLOW
-        # ----------------------------------------------------
+        # ====================================================
 
         if flow_row.empty:
 
@@ -900,25 +1069,47 @@ def main():
 
             flow_score = 50.0
 
-        # ----------------------------------------------------
+        # ====================================================
         # STRUCTURE
-        # ----------------------------------------------------
+        # ====================================================
 
         if structure_row.empty:
 
             s = {
-                "current_price": np.nan,
-                "call_wall": np.nan,
-                "put_wall": np.nan,
-                "support": np.nan,
-                "resistance": np.nan,
-                "call_gex": np.nan,
-                "put_gex": np.nan,
-                "net_gex": np.nan,
-                "structure": "NO DATA",
-                "price_location": "",
+
+                "current_price":
+                    np.nan,
+
+                "call_wall":
+                    np.nan,
+
+                "put_wall":
+                    np.nan,
+
+                "support":
+                    np.nan,
+
+                "resistance":
+                    np.nan,
+
+                "call_gex":
+                    np.nan,
+
+                "put_gex":
+                    np.nan,
+
+                "net_gex":
+                    np.nan,
+
+                "structure":
+                    "NO DATA",
+
+                "price_location":
+                    "",
+
                 "gex_structure":
                     "GEX UNAVAILABLE",
+
                 "wall_structure":
                     "WALL UNAVAILABLE",
             }
@@ -931,12 +1122,14 @@ def main():
                 .to_dict()
             )
 
-        # ----------------------------------------------------
-        # SCORES
-        # ----------------------------------------------------
+        # ====================================================
+        # COMPONENTS
+        # ====================================================
 
-        direction = direction_score(
-            top
+        direction = (
+            direction_score(
+                top
+            )
         )
 
         structure_component = (
@@ -952,7 +1145,9 @@ def main():
         )
 
         top20_score = numeric(
-            top["top20_score"]
+            top[
+                "top20_score"
+            ]
         )
 
         if np.isfinite(
@@ -969,7 +1164,7 @@ def main():
                 flow_score
             )
 
-        # ----------------------------------------------------
+        # ====================================================
         # FINAL SCORE
         #
         # Market       20%
@@ -978,7 +1173,10 @@ def main():
         # Structure    10%
         # Price        15%
         # Index        10%
-        # ----------------------------------------------------
+        #
+        # Structure now contains a meaningful GEX intensity
+        # component rather than a simple +/- fixed value.
+        # ====================================================
 
         score = (
 
@@ -1016,15 +1214,21 @@ def main():
         )
 
         decision = final_decision(
+
             score,
+
             direction,
-            s["structure"],
+
+            s[
+                "structure"
+            ],
+
             market_component,
         )
 
-        # ----------------------------------------------------
+        # ====================================================
         # REASONS
-        # ----------------------------------------------------
+        # ====================================================
 
         reasons = []
 
@@ -1058,13 +1262,21 @@ def main():
             ]
         )
 
-        if "BUY" in direction_text:
+        if (
+            "BUY" in direction_text
+            or
+            "BULL" in direction_text
+        ):
 
             reasons.append(
                 "Buy-side estimate"
             )
 
-        elif "SELL" in direction_text:
+        elif (
+            "SELL" in direction_text
+            or
+            "BEAR" in direction_text
+        ):
 
             reasons.append(
                 "Sell-side estimate"
@@ -1109,20 +1321,26 @@ def main():
                 "Balanced flow"
             )
 
-        # ----------------------------------------------------
-        # STRUCTURE REASONS
-        # ----------------------------------------------------
+        # ====================================================
+        # STRUCTURE
+        # ====================================================
 
         structure_text = text(
-            s["structure"]
+            s[
+                "structure"
+            ]
         )
 
         gex_text = text(
-            s["gex_structure"]
+            s[
+                "gex_structure"
+            ]
         )
 
         wall_text = text(
-            s["wall_structure"]
+            s[
+                "wall_structure"
+            ]
         )
 
         if structure_text:
@@ -1134,22 +1352,31 @@ def main():
                 )
             )
 
+        # ----------------------------------------------------
+        # GEX DETAIL
+        # ----------------------------------------------------
+
+        gex_strength = (
+            calculate_gex_strength(
+                s
+            )
+        )
+
         if gex_text == "POSITIVE GEX":
 
             reasons.append(
-                "Positive GEX"
+                "Positive GEX "
+                f"{gex_strength:.1f}"
             )
 
         elif gex_text == "NEGATIVE GEX":
 
             reasons.append(
-                "Negative GEX"
+                "Negative GEX "
+                f"{gex_strength:.1f}"
             )
 
-        elif (
-            gex_text
-            == "GEX UNAVAILABLE"
-        ):
+        else:
 
             reasons.append(
                 "GEX unavailable"
@@ -1164,30 +1391,35 @@ def main():
                 )
             )
 
-        # ----------------------------------------------------
+        # ====================================================
         # PRICE
-        # ----------------------------------------------------
+        # ====================================================
 
         price_location = text(
-            s["price_location"]
+            s[
+                "price_location"
+            ]
         )
 
         if price_location:
 
-            for item in price_location.split(
-                "|"
+            for item in (
+                price_location.split(
+                    "|"
+                )
             ):
 
                 item = item.strip()
 
                 if item:
+
                     reasons.append(
                         item
                     )
 
-        # ----------------------------------------------------
+        # ====================================================
         # INDEX
-        # ----------------------------------------------------
+        # ====================================================
 
         reasons.append(
             "Index alignment "
@@ -1196,164 +1428,175 @@ def main():
             f"NEUTRAL {neutral}"
         )
 
-        rows.append(
-            {
-                "rank": rank,
+        # ====================================================
+        # OUTPUT ROW
+        # ====================================================
 
-                "ticker": ticker,
+        rows.append({
 
-                "market_score":
-                    market_component,
+            "rank":
+                rank,
 
-                "market_regime":
-                    market["market_regime"],
+            "ticker":
+                ticker,
 
-                "ndx_direction":
-                    market[
-                        "ndx_direction"
-                    ],
+            "market_score":
+                market_component,
 
-                "spy_direction":
-                    market[
-                        "spy_direction"
-                    ],
+            "market_regime":
+                market[
+                    "market_regime"
+                ],
 
-                "soxx_direction":
-                    market[
-                        "soxx_direction"
-                    ],
+            "ndx_direction":
+                market[
+                    "ndx_direction"
+                ],
 
-                "dia_direction":
-                    market[
-                        "dia_direction"
-                    ],
+            "spy_direction":
+                market[
+                    "spy_direction"
+                ],
 
-                "top20_score":
-                    top20_score,
+            "soxx_direction":
+                market[
+                    "soxx_direction"
+                ],
 
-                "flow_score":
-                    flow_score,
+            "dia_direction":
+                market[
+                    "dia_direction"
+                ],
 
-                "direction_score":
-                    direction,
+            "top20_score":
+                top20_score,
 
-                "structure_score":
-                    structure_component,
+            "flow_score":
+                flow_score,
 
-                "price_score":
-                    price_component,
+            "direction_score":
+                direction,
 
-                "index_score":
-                    index_component,
+            "structure_score":
+                structure_component,
 
-                "current_price":
-                    numeric(
-                        s[
-                            "current_price"
-                        ]
-                    ),
+            "price_score":
+                price_component,
 
-                "call_wall":
-                    numeric(
-                        s[
-                            "call_wall"
-                        ]
-                    ),
+            "index_score":
+                index_component,
 
-                "put_wall":
-                    numeric(
-                        s[
-                            "put_wall"
-                        ]
-                    ),
-
-                "support":
-                    numeric(
-                        s[
-                            "support"
-                        ]
-                    ),
-
-                "resistance":
-                    numeric(
-                        s[
-                            "resistance"
-                        ]
-                    ),
-
-                "call_gex":
-                    numeric(
-                        s[
-                            "call_gex"
-                        ]
-                    ),
-
-                "put_gex":
-                    numeric(
-                        s[
-                            "put_gex"
-                        ]
-                    ),
-
-                "net_gex":
-                    numeric(
-                        s[
-                            "net_gex"
-                        ]
-                    ),
-
-                "structure":
+            "current_price":
+                numeric(
                     s[
-                        "structure"
-                    ],
+                        "current_price"
+                    ]
+                ),
 
-                "price_location":
+            "call_wall":
+                numeric(
                     s[
-                        "price_location"
-                    ],
+                        "call_wall"
+                    ]
+                ),
 
-                "gex_structure":
+            "put_wall":
+                numeric(
                     s[
-                        "gex_structure"
-                    ],
+                        "put_wall"
+                    ]
+                ),
 
-                "wall_structure":
+            "support":
+                numeric(
                     s[
-                        "wall_structure"
-                    ],
+                        "support"
+                    ]
+                ),
 
-                "index_bull":
-                    bull,
+            "resistance":
+                numeric(
+                    s[
+                        "resistance"
+                    ]
+                ),
 
-                "index_bear":
-                    bear,
+            "call_gex":
+                numeric(
+                    s[
+                        "call_gex"
+                    ]
+                ),
 
-                "index_neutral":
-                    neutral,
+            "put_gex":
+                numeric(
+                    s[
+                        "put_gex"
+                    ]
+                ),
 
-                "decision_score":
-                    score,
+            "net_gex":
+                numeric(
+                    s[
+                        "net_gex"
+                    ]
+                ),
 
-                "decision":
-                    decision,
+            "structure":
+                s[
+                    "structure"
+                ],
 
-                "reason":
-                    " | ".join(
-                        reasons
-                    ),
+            "price_location":
+                s[
+                    "price_location"
+                ],
 
-                "data_source":
-                    "STEP8_GEX_PROXY",
-            }
-        )
+            "gex_structure":
+                s[
+                    "gex_structure"
+                ],
+
+            "wall_structure":
+                s[
+                    "wall_structure"
+                ],
+
+            "index_bull":
+                bull,
+
+            "index_bear":
+                bear,
+
+            "index_neutral":
+                neutral,
+
+            "decision_score":
+                score,
+
+            "decision":
+                decision,
+
+            "reason":
+                " | ".join(
+                    reasons
+                ),
+
+            "data_source":
+                "STEP8_GEX_PROXY_INTENSITY",
+        })
+
+    # ========================================================
+    # OUTPUT
+    # ========================================================
 
     output = pd.DataFrame(
         rows
     )
 
-    # --------------------------------------------------------
-    # FINAL VALIDATION
-    # --------------------------------------------------------
+    # ========================================================
+    # VALIDATION
+    # ========================================================
 
     if len(output) != 20:
 
@@ -1362,8 +1605,9 @@ def main():
         )
 
     if (
-        output["ticker"]
-        .nunique()
+        output[
+            "ticker"
+        ].nunique()
         != 20
     ):
 
@@ -1372,8 +1616,9 @@ def main():
         )
 
     if (
-        output["decision_score"]
-        .isna()
+        output[
+            "decision_score"
+        ].isna()
         .any()
     ):
 
@@ -1381,7 +1626,26 @@ def main():
             "STEP 9 decision_score contains NaN"
         )
 
+    if (
+        (
+            output[
+                "decision_score"
+            ] < 0
+        )
+        |
+        (
+            output[
+                "decision_score"
+            ] > 100
+        )
+    ).any():
+
+        raise RuntimeError(
+            "STEP 9 decision_score outside 0-100"
+        )
+
     valid_decisions = {
+
         "🟢 진입",
         "🟡 관망",
         "🔴 회피",
@@ -1389,7 +1653,9 @@ def main():
 
     invalid = (
         set(
-            output["decision"]
+            output[
+                "decision"
+            ]
             .astype(str)
             .str.strip()
         )
@@ -1409,9 +1675,9 @@ def main():
             )
         )
 
-    # --------------------------------------------------------
+    # ========================================================
     # SORT
-    # --------------------------------------------------------
+    # ========================================================
 
     output = (
         output
@@ -1424,8 +1690,6 @@ def main():
         )
     )
 
-    # Re-rank after sorting.
-
     output["rank"] = (
         np.arange(
             1,
@@ -1433,9 +1697,9 @@ def main():
         )
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # SAVE
-    # --------------------------------------------------------
+    # ========================================================
 
     os.makedirs(
         ANALYSIS_DIR,
@@ -1447,9 +1711,9 @@ def main():
         index=False,
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # OUTPUT
-    # --------------------------------------------------------
+    # ========================================================
 
     print()
 
@@ -1476,7 +1740,53 @@ def main():
                 "decision",
                 "gex_structure",
             ]
-        ].to_string(
+        ]
+        .to_string(
+            index=False
+        )
+    )
+
+    print()
+
+    print(
+        "GEX INTENSITY"
+    )
+
+    print()
+
+    gex_table = []
+
+    for _, row in output.iterrows():
+
+        gex_table.append({
+
+            "ticker":
+                row["ticker"],
+
+            "call_gex":
+                row["call_gex"],
+
+            "put_gex":
+                row["put_gex"],
+
+            "net_gex":
+                row["net_gex"],
+
+            "gex_strength":
+                calculate_gex_strength(
+                    row
+                ),
+
+            "gex_structure":
+                row[
+                    "gex_structure"
+                ],
+        })
+
+    print(
+        pd.DataFrame(
+            gex_table
+        ).to_string(
             index=False
         )
     )
@@ -1524,7 +1834,8 @@ def main():
     )
 
     print(
-        f"COLUMNS : {list(output.columns)}"
+        f"COLUMNS : "
+        f"{list(output.columns)}"
     )
 
     print(
@@ -1533,4 +1844,5 @@ def main():
 
 
 if __name__ == "__main__":
+
     main()
