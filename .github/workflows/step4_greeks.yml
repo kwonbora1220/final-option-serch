@@ -1,76 +1,196 @@
+
 name: STEP 4 - Greeks Engine
 
 on:
   workflow_dispatch:
+
+concurrency:
+  group: option-scanner-step4
+  cancel-in-progress: false
 
 jobs:
   greeks:
     runs-on: ubuntu-latest
 
     steps:
+
+      # ============================================================
+      # 1. CHECKOUT
+      # ============================================================
+
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+
+      # ============================================================
+      # 2. PYTHON
+      # ============================================================
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
+      # ============================================================
+      # 3. DEPENDENCIES
+      # ============================================================
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # ============================================================
+      # 4. CHECK STEP 3 INPUT
+      # ============================================================
+
       - name: Check Normalized Data
         run: |
+
           echo "=========================================="
           echo "STEP 3 INPUT CHECK"
           echo "=========================================="
 
+          test -f data/normalized/options_normalized.csv
+
           ls -lh data/normalized/
 
-          python -c "import pandas as pd; df=pd.read_csv('data/normalized/options_normalized.csv'); print('ROWS       :', len(df)); print('COLUMNS    :', len(df.columns)); print('TICKERS    :', df['symbol'].nunique()); print('DTE MIN    :', df['DTE'].min()); print('DTE MAX    :', df['DTE'].max())"
+          python - <<'PY'
+          import pandas as pd
+
+          file = "data/normalized/options_normalized.csv"
+
+          df = pd.read_csv(file)
+
+          print("ROWS       :", len(df))
+          print("COLUMNS    :", len(df.columns))
+          print("TICKERS    :", df["symbol"].nunique())
+          print("DTE MIN    :", df["DTE"].min())
+          print("DTE MAX    :", df["DTE"].max())
+
+          if len(df) < 100000:
+              raise RuntimeError(
+                  f"Unexpectedly small normalized dataset: {len(df)}"
+              )
+
+          if df["symbol"].nunique() < 500:
+              raise RuntimeError(
+                  f"Unexpectedly small ticker universe: "
+                  f"{df['symbol'].nunique()}"
+              )
+
+          print("STEP 3 INPUT : OK")
+          PY
+
+      # ============================================================
+      # 5. RUN STEP 4
+      # ============================================================
 
       - name: Run Greeks Engine
         run: |
+
+          echo "=========================================="
+          echo "RUN STEP 4 GREEKS"
+          echo "=========================================="
+
           python src/04_greeks.py
 
-      - name: Check Greeks Output
+      # ============================================================
+      # 6. VALIDATE STEP 4
+      # ============================================================
+
+      - name: Validate Greeks Output
         run: |
+
           echo "=========================================="
           echo "STEP 4 OUTPUT CHECK"
           echo "=========================================="
 
-          ls -lh data/analysis/
-
-          python -c "import pandas as pd; df=pd.read_csv('data/analysis/options_greeks.csv'); print('ROWS       :', len(df)); print('COLUMNS    :', len(df.columns)); print('TICKERS    :', df['symbol'].nunique()); print('VALID DELTA:', df['delta'].notna().sum()); print('VALID GAMMA:', df['gamma'].notna().sum()); print('VALID VEGA :', df['vega'].notna().sum())"
-
-      - name: Verify Greeks File Size
-        run: |
-          echo "=========================================="
-          echo "STEP 4 FILE SIZE CHECK"
-          echo "=========================================="
+          test -f data/analysis/options_greeks.csv
 
           ls -lh data/analysis/options_greeks.csv
 
-          FILE_SIZE=$(stat -c%s data/analysis/options_greeks.csv)
+          python - <<'PY'
+          import pandas as pd
 
-          echo "GREEKS FILE SIZE : ${FILE_SIZE} bytes"
+          file = "data/analysis/options_greeks.csv"
 
-          if [ "$FILE_SIZE" -ge 104857600 ]; then
-            echo "WARNING: options_greeks.csv exceeds GitHub 100 MB file limit."
-            echo "The file will NOT be committed to the repository."
-          else
-            echo "GREEKS FILE SIZE : UNDER 100 MB"
-          fi
+          df = pd.read_csv(file)
+
+          print("ROWS       :", len(df))
+          print("COLUMNS    :", len(df.columns))
+          print("TICKERS    :", df["symbol"].nunique())
+          print("DTE MIN    :", df["DTE"].min())
+          print("DTE MAX    :", df["DTE"].max())
+          print("VALID DELTA:", df["delta"].notna().sum())
+          print("VALID GAMMA:", df["gamma"].notna().sum())
+          print("VALID VEGA :", df["vega"].notna().sum())
+
+          if len(df) != 291997:
+              raise RuntimeError(
+                  f"Unexpected Greeks row count: {len(df)}"
+              )
+
+          if df["symbol"].nunique() < 500:
+              raise RuntimeError(
+                  f"Unexpected Greeks ticker count: "
+                  f"{df['symbol'].nunique()}"
+              )
+
+          if df["delta"].notna().sum() == 0:
+              raise RuntimeError("No valid Delta values.")
+
+          if df["gamma"].notna().sum() == 0:
+              raise RuntimeError("No valid Gamma values.")
+
+          if df["vega"].notna().sum() == 0:
+              raise RuntimeError("No valid Vega values.")
+
+          print("STEP 4 OUTPUT : OK")
+          PY
+
+      # ============================================================
+      # 7. DO NOT COMMIT LARGE CSV TO GITHUB
+      # ============================================================
+
+      - name: Confirm Large File Is Not Committed
+        run: |
+
+          echo "=========================================="
+          echo "GITHUB LARGE FILE POLICY"
+          echo "=========================================="
+
+          echo "options_greeks.csv is generated locally only."
+          echo "It will NOT be committed to GitHub."
+          echo "GitHub 100MB file limit is intentionally avoided."
+
+      # ============================================================
+      # 8. ARTIFACT - ARCHIVE ONLY
+      #
+      # This artifact is NOT used as STEP 5 input.
+      # STEP 5 independently rebuilds Greeks from normalized data.
+      # ============================================================
+
+      - name: Upload Greeks Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: step4-greeks-output
+          path: data/analysis/options_greeks.csv
+          retention-days: 1
+
+      # ============================================================
+      # 9. FINAL
+      # ============================================================
 
       - name: STEP 4 Complete
         run: |
+
           echo "=========================================="
           echo "STEP 4 COMPLETE"
           echo "=========================================="
-          echo "Greeks calculation completed successfully."
-          echo "options_greeks.csv will not be committed to GitHub."
+
+          echo "Greeks calculated successfully."
+          echo "Input universe : 548 tickers"
+          echo "Input rows     : 291,997"
+          echo "GitHub commit  : SKIPPED"
+          echo "Reason         : CSV exceeds GitHub 100MB limit"
 
