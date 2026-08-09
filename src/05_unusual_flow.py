@@ -1075,7 +1075,7 @@ def main():
     print()
 
     print(
-        "🔥 TOP 10 OPTION FLOW"
+        "🔥 TOP 20 OPTION FLOW"
     )
 
     print("=" * 72)
@@ -1100,7 +1100,7 @@ def main():
         df[
             top_columns
         ]
-        .head(10)
+        .head(20)
         .to_string(
             index=False
         )
