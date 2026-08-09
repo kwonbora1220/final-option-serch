@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import os
@@ -20,6 +19,7 @@ OUTPUT_FILE = os.path.join(
     "unusual_flow.csv",
 )
 
+
 # ============================================================
 # FLOW SCORE WEIGHTS
 # ============================================================
@@ -32,6 +32,25 @@ WEIGHT_GAMMA = 10
 WEIGHT_IV = 5
 WEIGHT_DTE = 5
 WEIGHT_MONEYNESS = 5
+
+
+# ============================================================
+# SIDE CONFIDENCE
+# ============================================================
+
+# Only the outer part of the bid/ask spread is considered
+# directionally reliable.
+#
+# 0.00 ~ 0.20  : near BID  -> SELL
+# 0.20 ~ 0.80  : ambiguous -> UNKNOWN
+# 0.80 ~ 1.00  : near ASK  -> BUY
+#
+# This deliberately creates more UNKNOWN values.
+# Accuracy is more important than forcing BUY/SELL.
+# ============================================================
+
+BUY_THRESHOLD = 0.80
+SELL_THRESHOLD = 0.20
 
 
 # ============================================================
@@ -73,10 +92,18 @@ def normalize_option_type(value):
         .strip()
     )
 
-    if value in {"CALL", "C", "CALLS"}:
+    if value in {
+        "CALL",
+        "C",
+        "CALLS",
+    }:
         return "CALL"
 
-    if value in {"PUT", "P", "PUTS"}:
+    if value in {
+        "PUT",
+        "P",
+        "PUTS",
+    }:
         return "PUT"
 
     return "UNKNOWN"
@@ -130,12 +157,12 @@ def calculate_moneyness(row):
             or
             strike <= 0
         ):
+
             return np.nan
 
         return (
-            (strike - price)
-            / price
-        )
+            strike - price
+        ) / price
 
     except Exception:
 
@@ -144,40 +171,54 @@ def calculate_moneyness(row):
 
 # ============================================================
 # TRADE SIDE ESTIMATION
+# ============================================================
 #
-# IMPORTANT:
+# IMPORTANT
 #
 # This is NOT actual exchange trade direction.
 #
-# It is an EOD estimation using:
+# It is an EOD quote-position estimate.
 #
-# 1. last vs ask
-# 2. last vs bid
-# 3. last vs midpoint
-# 4. bid/ask spread position
-# 5. last price validity
-# 6. change as a final weak tiebreaker
+# BUY:
+#   last >= ask
+#   OR last is very near ask
 #
-# Goal:
-# Reduce unnecessary UNKNOWN values while keeping
-# ESTIMATED status explicit.
+# SELL:
+#   last <= bid
+#   OR last is very near bid
+#
+# UNKNOWN:
+#   midpoint / ambiguous region
+#   invalid quote
+#   missing quote
+#
+# We intentionally DO NOT use daily change as a
+# BUY/SELL tiebreaker.
 # ============================================================
 
 def estimate_trade_side(row):
 
     try:
 
-        bid = float(row["bid"])
-        ask = float(row["ask"])
-        last = float(row["lastPrice"])
+        bid = float(
+            row["bid"]
+        )
+
+        ask = float(
+            row["ask"]
+        )
+
+        last = float(
+            row["lastPrice"]
+        )
 
     except Exception:
 
-        return "UNKNOWN"
-
-    # --------------------------------------------------------
-    # BASIC VALIDATION
-    # --------------------------------------------------------
+        return (
+            "UNKNOWN",
+            0.0,
+            "INVALID_QUOTE",
+        )
 
     values = [
         bid,
@@ -189,7 +230,12 @@ def estimate_trade_side(row):
         np.isfinite(v)
         for v in values
     ):
-        return "UNKNOWN"
+
+        return (
+            "UNKNOWN",
+            0.0,
+            "INVALID_QUOTE",
+        )
 
     if (
         bid < 0
@@ -197,105 +243,137 @@ def estimate_trade_side(row):
         ask < 0
         or
         last <= 0
+        or
+        ask < bid
     ):
-        return "UNKNOWN"
 
-    if ask < bid:
-        return "UNKNOWN"
+        return (
+            "UNKNOWN",
+            0.0,
+            "INVALID_QUOTE",
+        )
 
     spread = ask - bid
 
     # --------------------------------------------------------
-    # ZERO SPREAD
+    # ZERO / LOCKED SPREAD
     # --------------------------------------------------------
 
     if spread <= 0:
 
-        if abs(last - bid) <= 0.01:
-            return "BUY EST."
-
-        return "UNKNOWN"
-
-    midpoint = (
-        bid + ask
-    ) / 2.0
+        return (
+            "UNKNOWN",
+            0.0,
+            "ZERO_SPREAD",
+        )
 
     # --------------------------------------------------------
-    # LAST OUTSIDE QUOTE
-    #
-    # If last is above ask -> strong BUY indication.
-    # If last is below bid -> strong SELL indication.
+    # LAST OUTSIDE / AT QUOTE
     # --------------------------------------------------------
 
     if last >= ask:
 
-        return "BUY EST."
+        return (
+            "BUY EST.",
+            1.0,
+            "AT_OR_ABOVE_ASK",
+        )
 
     if last <= bid:
 
-        return "SELL EST."
+        return (
+            "SELL EST.",
+            1.0,
+            "AT_OR_BELOW_BID",
+        )
 
     # --------------------------------------------------------
     # POSITION INSIDE SPREAD
     # --------------------------------------------------------
 
-    relative_position = (
+    position = (
         last - bid
     ) / spread
 
-    # Very close to ask.
-    if relative_position >= 0.70:
-        return "BUY EST."
-
-    # Very close to bid.
-    if relative_position <= 0.30:
-        return "SELL EST."
-
     # --------------------------------------------------------
-    # MIDPOINT REGION
-    #
-    # Instead of immediately returning UNKNOWN,
-    # use distance from midpoint.
-    #
-    # This increases coverage substantially.
+    # BUY
     # --------------------------------------------------------
 
-    if last > midpoint:
+    if position >= BUY_THRESHOLD:
 
-        return "BUY EST."
-
-    if last < midpoint:
-
-        return "SELL EST."
-
-    # --------------------------------------------------------
-    # EXACT MIDPOINT
-    #
-    # Use change only as weak tiebreaker.
-    # --------------------------------------------------------
-
-    try:
-
-        change = float(
-            row["change"]
+        confidence = (
+            0.80
+            +
+            (
+                position
+                -
+                BUY_THRESHOLD
+            )
+            /
+            (
+                1.0
+                -
+                BUY_THRESHOLD
+            )
+            * 0.20
         )
 
-        if np.isfinite(change):
+        confidence = min(
+            1.0,
+            max(
+                0.80,
+                confidence,
+            ),
+        )
 
-            if change > 0:
-                return "BUY EST."
-
-            if change < 0:
-                return "SELL EST."
-
-    except Exception:
-        pass
+        return (
+            "BUY EST.",
+            confidence,
+            "NEAR_ASK",
+        )
 
     # --------------------------------------------------------
-    # FINAL
+    # SELL
     # --------------------------------------------------------
 
-    return "UNKNOWN"
+    if position <= SELL_THRESHOLD:
+
+        confidence = (
+            0.80
+            +
+            (
+                SELL_THRESHOLD
+                -
+                position
+            )
+            /
+            SELL_THRESHOLD
+            * 0.20
+        )
+
+        confidence = min(
+            1.0,
+            max(
+                0.80,
+                confidence,
+            ),
+        )
+
+        return (
+            "SELL EST.",
+            confidence,
+            "NEAR_BID",
+        )
+
+    # --------------------------------------------------------
+    # MID / AMBIGUOUS
+    # --------------------------------------------------------
+
+    return (
+        "UNKNOWN",
+        0.0,
+        "MID_AMBIGUOUS",
+    )
 
 
 # ============================================================
@@ -305,14 +383,21 @@ def estimate_trade_side(row):
 def normalize_trade_side(value):
 
     if pd.isna(value):
+
         return "UNKNOWN"
 
     text = (
         str(value)
         .upper()
         .strip()
-        .replace("-", "_")
-        .replace(" ", "_")
+        .replace(
+            "-",
+            "_",
+        )
+        .replace(
+            " ",
+            "_",
+        )
     )
 
     if text in {
@@ -326,6 +411,7 @@ def normalize_trade_side(value):
         "BUY_TO_CLOSE",
         "BTC",
     }:
+
         return "BUY"
 
     if text in {
@@ -339,6 +425,7 @@ def normalize_trade_side(value):
         "SELL_TO_CLOSE",
         "STC",
     }:
+
         return "SELL"
 
     return "UNKNOWN"
@@ -346,11 +433,6 @@ def normalize_trade_side(value):
 
 # ============================================================
 # OPEN / CLOSE ESTIMATION
-#
-# EOD option chain data cannot reliably identify
-# open/close.
-#
-# We therefore use volume/OI only as a weak estimate.
 # ============================================================
 
 def estimate_open_close(row):
@@ -380,12 +462,14 @@ def estimate_open_close(row):
         or
         volume <= 0
     ):
+
         return "UNKNOWN"
 
     if side not in {
         "BUY EST.",
         "SELL EST.",
     }:
+
         return "UNKNOWN"
 
     if oi <= 0:
@@ -402,17 +486,11 @@ def estimate_open_close(row):
 
         return "OPEN EST."
 
-    # Moderate volume/OI is ambiguous.
     return "UNKNOWN"
 
 
 # ============================================================
 # FLOW DIRECTION
-#
-# CALL BUY = bullish
-# PUT SELL = bullish
-# CALL SELL = bearish
-# PUT BUY = bearish
 # ============================================================
 
 def directional_flow(row):
@@ -428,17 +506,21 @@ def directional_flow(row):
     if option_type == "CALL":
 
         if side == "BUY":
+
             return "BULLISH"
 
         if side == "SELL":
+
             return "BEARISH"
 
     elif option_type == "PUT":
 
         if side == "SELL":
+
             return "BULLISH"
 
         if side == "BUY":
+
             return "BEARISH"
 
     return "UNKNOWN"
@@ -456,10 +538,13 @@ def main():
     # INPUT
     # ========================================================
 
-    if not os.path.exists(INPUT_FILE):
+    if not os.path.exists(
+        INPUT_FILE
+    ):
 
         raise FileNotFoundError(
-            f"Input file not found: {INPUT_FILE}"
+            f"Input file not found: "
+            f"{INPUT_FILE}"
         )
 
     df = pd.read_csv(
@@ -469,7 +554,8 @@ def main():
     input_rows = len(df)
 
     log(
-        f"INPUT ROWS : {input_rows:,}"
+        f"INPUT ROWS : "
+        f"{input_rows:,}"
     )
 
     # ========================================================
@@ -489,7 +575,6 @@ def main():
         "bid",
         "ask",
         "lastPrice",
-        "change",
 
         "impliedVolatility",
 
@@ -501,9 +586,14 @@ def main():
     ]
 
     missing = [
+
         column
-        for column in required_columns
-        if column not in df.columns
+
+        for column
+        in required_columns
+
+        if column
+        not in df.columns
     ]
 
     if missing:
@@ -511,7 +601,9 @@ def main():
         raise RuntimeError(
             "Missing required columns: "
             +
-            ", ".join(missing)
+            ", ".join(
+                missing
+            )
         )
 
     # ========================================================
@@ -529,7 +621,6 @@ def main():
         "bid",
         "ask",
         "lastPrice",
-        "change",
 
         "impliedVolatility",
 
@@ -550,8 +641,12 @@ def main():
     # OPTION TYPE
     # ========================================================
 
-    df["option_type"] = (
-        df["option_type"]
+    df[
+        "option_type"
+    ] = (
+        df[
+            "option_type"
+        ]
         .apply(
             normalize_option_type
         )
@@ -561,18 +656,28 @@ def main():
     # MID PRICE
     # ========================================================
 
-    df["mid_price"] = (
+    df[
+        "mid_price"
+    ] = (
         df["bid"]
         +
         df["ask"]
     ) / 2.0
 
-    # If bid/ask unavailable, use last price.
-    df["mid_price"] = (
-        df["mid_price"]
+    df[
+        "mid_price"
+    ] = (
+        df[
+            "mid_price"
+        ]
         .where(
-            df["mid_price"].gt(0),
-            df["lastPrice"],
+            df[
+                "mid_price"
+            ].gt(0),
+
+            df[
+                "lastPrice"
+            ],
         )
     )
 
@@ -580,15 +685,32 @@ def main():
     # PREMIUM
     # ========================================================
 
-    df["estimated_traded_premium"] = (
-        df["volume"].clip(lower=0)
+    df[
+        "estimated_traded_premium"
+    ] = (
+
+        df[
+            "volume"
+        ].clip(
+            lower=0
+        )
+
         *
-        df["mid_price"].clip(lower=0)
+
+        df[
+            "mid_price"
+        ].clip(
+            lower=0
+        )
+
         *
+
         100.0
     )
 
-    df["premium_source"] = (
+    df[
+        "premium_source"
+    ] = (
         "CALCULATED_MID_OR_LAST"
     )
 
@@ -596,13 +718,21 @@ def main():
     # VOLUME / OI
     # ========================================================
 
-    df["volume_oi_ratio"] = np.where(
+    df[
+        "volume_oi_ratio"
+    ] = np.where(
 
-        df["openInterest"] > 0,
+        df[
+            "openInterest"
+        ] > 0,
 
-        df["volume"]
+        df[
+            "volume"
+        ]
         /
-        df["openInterest"],
+        df[
+            "openInterest"
+        ],
 
         np.nan,
     )
@@ -611,11 +741,11 @@ def main():
     # MONEYNESS
     # ========================================================
 
-    df["moneyness"] = (
-        df.apply(
-            calculate_moneyness,
-            axis=1,
-        )
+    df[
+        "moneyness"
+    ] = df.apply(
+        calculate_moneyness,
+        axis=1,
     )
 
     # ========================================================
@@ -626,22 +756,42 @@ def main():
         "ESTIMATING BUY / SELL"
     )
 
-    df["trade_side_estimate"] = (
-        df.apply(
-            estimate_trade_side,
-            axis=1,
-        )
+    side_result = df.apply(
+        estimate_trade_side,
+        axis=1,
+        result_type="expand",
     )
 
-    df["trade_side"] = (
-        df["trade_side_estimate"]
+    side_result.columns = [
+
+        "trade_side_estimate",
+        "trade_side_confidence",
+        "trade_side_method",
+    ]
+
+    df = pd.concat(
+        [
+            df,
+            side_result,
+        ],
+        axis=1,
+    )
+
+    df[
+        "trade_side"
+    ] = (
+        df[
+            "trade_side_estimate"
+        ]
         .apply(
             normalize_trade_side
         )
     )
 
-    df["trade_side_source"] = (
-        "ESTIMATED_BID_ASK_MID_LAST"
+    df[
+        "trade_side_source"
+    ] = (
+        "ESTIMATED_BID_ASK_POSITION"
     )
 
     # ========================================================
@@ -652,14 +802,16 @@ def main():
         "ESTIMATING OPEN / CLOSE"
     )
 
-    df["open_close_estimate"] = (
-        df.apply(
-            estimate_open_close,
-            axis=1,
-        )
+    df[
+        "open_close_estimate"
+    ] = df.apply(
+        estimate_open_close,
+        axis=1,
     )
 
-    df["open_close_source"] = (
+    df[
+        "open_close_source"
+    ] = (
         "ESTIMATED_VOLUME_OI"
     )
 
@@ -667,11 +819,11 @@ def main():
     # DIRECTIONAL FLOW
     # ========================================================
 
-    df["directional_flow"] = (
-        df.apply(
-            directional_flow,
-            axis=1,
-        )
+    df[
+        "directional_flow"
+    ] = df.apply(
+        directional_flow,
+        axis=1,
     )
 
     # ========================================================
@@ -684,111 +836,152 @@ def main():
 
     volume_score = percentile_score(
         np.log1p(
-            df["volume"]
-            .clip(lower=0)
+            df[
+                "volume"
+            ].clip(
+                lower=0
+            )
         )
     )
 
     volume_oi_score = percentile_score(
         np.log1p(
-            df["volume_oi_ratio"]
+            df[
+                "volume_oi_ratio"
+            ]
             .replace(
-                [np.inf, -np.inf],
+                [
+                    np.inf,
+                    -np.inf,
+                ],
                 np.nan,
             )
-            .clip(lower=0)
+            .clip(
+                lower=0
+            )
         )
     )
 
     premium_score = percentile_score(
         np.log1p(
-            df["estimated_traded_premium"]
-            .clip(lower=0)
+            df[
+                "estimated_traded_premium"
+            ].clip(
+                lower=0
+            )
         )
     )
 
     delta_score = percentile_score(
-        df["delta"].abs()
+        df[
+            "delta"
+        ].abs()
     )
 
     gamma_score = percentile_score(
-        df["gamma"].abs()
+        df[
+            "gamma"
+        ].abs()
     )
 
     iv_score = percentile_score(
-        df["impliedVolatility"]
+        df[
+            "impliedVolatility"
+        ]
     )
 
     dte_score = percentile_score(
         1.0
         /
-        df["DTE"].clip(
+        df[
+            "DTE"
+        ].clip(
             lower=1
         )
     )
 
     moneyness_score = percentile_score(
-        -df["moneyness"].abs()
+        -df[
+            "moneyness"
+        ].abs()
     )
 
     # ========================================================
     # FLOW SCORE
     # ========================================================
 
-    df["flow_score"] = (
+    df[
+        "flow_score"
+    ] = (
 
         volume_score
-        * WEIGHT_VOLUME
+        *
+        WEIGHT_VOLUME
 
         +
 
         volume_oi_score
-        * WEIGHT_VOLUME_OI
+        *
+        WEIGHT_VOLUME_OI
 
         +
 
         premium_score
-        * WEIGHT_PREMIUM
+        *
+        WEIGHT_PREMIUM
 
         +
 
         delta_score
-        * WEIGHT_DELTA
+        *
+        WEIGHT_DELTA
 
         +
 
         gamma_score
-        * WEIGHT_GAMMA
+        *
+        WEIGHT_GAMMA
 
         +
 
         iv_score
-        * WEIGHT_IV
+        *
+        WEIGHT_IV
 
         +
 
         dte_score
-        * WEIGHT_DTE
+        *
+        WEIGHT_DTE
 
         +
 
         moneyness_score
-        * WEIGHT_MONEYNESS
+        *
+        WEIGHT_MONEYNESS
     )
 
     # ========================================================
     # CALL / PUT FLOW
     # ========================================================
 
-    df["call_put_flow"] = np.where(
+    df[
+        "call_put_flow"
+    ] = np.where(
 
-        df["option_type"] == "CALL",
+        df[
+            "option_type"
+        ] == "CALL",
 
-        df["estimated_traded_premium"],
+        df[
+            "estimated_traded_premium"
+        ],
 
         np.where(
 
-            df["option_type"] == "PUT",
+            df[
+                "option_type"
+            ] == "PUT",
 
             -df[
                 "estimated_traded_premium"
@@ -806,11 +999,15 @@ def main():
         "estimated_directional_premium"
     ] = np.where(
 
-        df["trade_side"] == "BUY",
+        df[
+            "trade_side"
+        ] == "BUY",
 
         np.where(
 
-            df["option_type"] == "CALL",
+            df[
+                "option_type"
+            ] == "CALL",
 
             df[
                 "estimated_traded_premium"
@@ -823,11 +1020,15 @@ def main():
 
         np.where(
 
-            df["trade_side"] == "SELL",
+            df[
+                "trade_side"
+            ] == "SELL",
 
             np.where(
 
-                df["option_type"] == "PUT",
+                df[
+                    "option_type"
+                ] == "PUT",
 
                 df[
                     "estimated_traded_premium"
@@ -857,11 +1058,11 @@ def main():
         )
     )
 
-    df["flow_rank"] = (
-        np.arange(
-            1,
-            len(df) + 1,
-        )
+    df[
+        "flow_rank"
+    ] = np.arange(
+        1,
+        len(df) + 1,
     )
 
     # ========================================================
@@ -873,6 +1074,7 @@ def main():
     )
 
     symbol_summary = (
+
         df.groupby(
             "symbol",
             dropna=False,
@@ -896,23 +1098,29 @@ def main():
 
             call_premium=(
                 "estimated_traded_premium",
+
                 lambda x:
                 x[
                     df.loc[
                         x.index,
                         "option_type",
-                    ] == "CALL"
+                    ]
+                    ==
+                    "CALL"
                 ].sum(),
             ),
 
             put_premium=(
                 "estimated_traded_premium",
+
                 lambda x:
                 x[
                     df.loc[
                         x.index,
                         "option_type",
-                    ] == "PUT"
+                    ]
+                    ==
+                    "PUT"
                 ].sum(),
             ),
 
@@ -928,14 +1136,20 @@ def main():
 
             bullish_premium=(
                 "estimated_directional_premium",
+
                 lambda x:
-                x[x > 0].sum(),
+                x[
+                    x > 0
+                ].sum(),
             ),
 
             bearish_premium=(
                 "estimated_directional_premium",
+
                 lambda x:
-                -x[x < 0].sum(),
+                -x[
+                    x < 0
+                ].sum(),
             ),
         )
         .reset_index()
@@ -1022,7 +1236,8 @@ def main():
                 "total_premium"
             ]
         )
-        * 40.0
+        *
+        40.0
 
         +
 
@@ -1031,7 +1246,8 @@ def main():
                 "total_volume"
             ]
         )
-        * 20.0
+        *
+        20.0
 
         +
 
@@ -1040,16 +1256,17 @@ def main():
                 "max_flow_score"
             ]
         )
-        * 25.0
+        *
+        25.0
 
         +
 
-        (
-            symbol_summary[
-                "call_put_premium_imbalance"
-            ].abs()
-            * 15.0
-        )
+        symbol_summary[
+            "call_put_premium_imbalance"
+        ]
+        .abs()
+        *
+        15.0
     )
 
     symbol_summary = (
@@ -1071,49 +1288,51 @@ def main():
     )
 
     # ========================================================
-    # SYMBOL FLOW DIRECTION
+    # SYMBOL DIRECTION
     # ========================================================
-
-    def symbol_direction(row):
-
-        ratio = row[
-            "directional_ratio"
-        ]
-
-        if ratio >= 60:
-            return "BULLISH"
-
-        if ratio <= 40:
-            return "BEARISH"
-
-        return "MIXED"
 
     symbol_summary[
         "estimated_direction"
-    ] = symbol_summary.apply(
-        symbol_direction,
-        axis=1,
+    ] = np.select(
+
+        [
+            symbol_summary[
+                "directional_ratio"
+            ] >= 60,
+
+            symbol_summary[
+                "directional_ratio"
+            ] <= 40,
+        ],
+
+        [
+            "BULLISH",
+            "BEARISH",
+        ],
+
+        default="MIXED",
     )
-
-    def cp_direction(row):
-
-        value = row[
-            "call_put_premium_imbalance"
-        ]
-
-        if value >= 0.15:
-            return "CALL DOMINANT"
-
-        if value <= -0.15:
-            return "PUT DOMINANT"
-
-        return "BALANCED"
 
     symbol_summary[
         "flow_direction"
-    ] = symbol_summary.apply(
-        cp_direction,
-        axis=1,
+    ] = np.select(
+
+        [
+            symbol_summary[
+                "call_put_premium_imbalance"
+            ] >= 0.15,
+
+            symbol_summary[
+                "call_put_premium_imbalance"
+            ] <= -0.15,
+        ],
+
+        [
+            "CALL DOMINANT",
+            "PUT DOMINANT",
+        ],
+
+        default="BALANCED",
     )
 
     # ========================================================
@@ -1182,7 +1401,9 @@ def main():
         ]
 
         if (
-            np.isfinite(imbalance)
+            np.isfinite(
+                imbalance
+            )
             and
             abs(imbalance) >= 0.25
         ):
@@ -1215,7 +1436,9 @@ def main():
                 "Sell-side estimate"
             )
 
-        if row["DTE"] <= 45:
+        if row[
+            "DTE"
+        ] <= 45:
 
             reasons.append(
                 "Near-term concentration"
@@ -1231,11 +1454,11 @@ def main():
             reasons[:4]
         )
 
-    df["flow_reason"] = (
-        df.apply(
-            reason,
-            axis=1,
-        )
+    df[
+        "flow_reason"
+    ] = df.apply(
+        reason,
+        axis=1,
     )
 
     # ========================================================
@@ -1322,17 +1545,35 @@ def main():
         "UNKNOWN"
     ).sum()
 
+    reliable_side_count = (
+        df[
+            "trade_side_confidence"
+        ]
+        >= 0.80
+    ).sum()
+
     print()
-    print("=" * 72)
-    print("🔎 STEP 5 VALIDATION")
-    print("=" * 72)
 
     print(
-        f"INPUT ROWS        : {input_rows:,}"
+        "=" * 72
     )
 
     print(
-        f"OUTPUT ROWS       : {output_rows:,}"
+        "🔎 STEP 5 VALIDATION"
+    )
+
+    print(
+        "=" * 72
+    )
+
+    print(
+        f"INPUT ROWS        : "
+        f"{input_rows:,}"
+    )
+
+    print(
+        f"OUTPUT ROWS       : "
+        f"{output_rows:,}"
     )
 
     print(
@@ -1343,39 +1584,54 @@ def main():
     print()
 
     print(
-        f"BUY EST.          : {buy_est:,}"
+        f"BUY EST.          : "
+        f"{buy_est:,}"
     )
 
     print(
-        f"SELL EST.         : {sell_est:,}"
+        f"SELL EST.         : "
+        f"{sell_est:,}"
     )
 
     print(
-        f"UNKNOWN           : {unknown_est:,}"
-    )
-
-    print()
-
-    print(
-        f"BUY NORMALIZED    : {buy_normalized:,}"
-    )
-
-    print(
-        f"SELL NORMALIZED   : {sell_normalized:,}"
-    )
-
-    print(
-        f"UNKNOWN NORMALIZED: {unknown_normalized:,}"
+        f"UNKNOWN           : "
+        f"{unknown_est:,}"
     )
 
     print()
 
     print(
-        f"OPEN EST.         : {open_est:,}"
+        f"BUY NORMALIZED    : "
+        f"{buy_normalized:,}"
     )
 
     print(
-        f"UNKNOWN OPEN/CLOSE: {unknown_open:,}"
+        f"SELL NORMALIZED   : "
+        f"{sell_normalized:,}"
+    )
+
+    print(
+        f"UNKNOWN NORMALIZED: "
+        f"{unknown_normalized:,}"
+    )
+
+    print()
+
+    print(
+        f"CONFIDENCE >= 0.80: "
+        f"{reliable_side_count:,}"
+    )
+
+    print()
+
+    print(
+        f"OPEN EST.         : "
+        f"{open_est:,}"
+    )
+
+    print(
+        f"UNKNOWN OPEN/CLOSE: "
+        f"{unknown_open:,}"
     )
 
     print()
@@ -1387,7 +1643,7 @@ def main():
 
     print(
         "TRADE SIDE SOURCE : "
-        "ESTIMATED_BID_ASK_MID_LAST"
+        "ESTIMATED_BID_ASK_POSITION"
     )
 
     print(
@@ -1397,7 +1653,11 @@ def main():
 
     print()
 
-    if input_rows != output_rows:
+    if (
+        input_rows
+        !=
+        output_rows
+    ):
 
         raise RuntimeError(
             "Input/output row count mismatch."
@@ -1408,10 +1668,14 @@ def main():
     )
 
     print()
+
     print(
         "🔥 TOP 20 OPTION FLOW"
     )
-    print("=" * 72)
+
+    print(
+        "=" * 72
+    )
 
     top_columns = [
 
@@ -1425,6 +1689,8 @@ def main():
         "volume_oi_ratio",
         "estimated_traded_premium",
         "trade_side_estimate",
+        "trade_side_confidence",
+        "trade_side_method",
         "trade_side",
         "directional_flow",
         "flow_score",
@@ -1441,14 +1707,18 @@ def main():
         )
     )
 
-    print("=" * 72)
+    print(
+        "=" * 72
+    )
 
     print(
         f"OUTPUT FILE      : "
         f"{OUTPUT_FILE}"
     )
 
-    print("=" * 72)
+    print(
+        "=" * 72
+    )
 
     log(
         "STEP 5 UNUSUAL FLOW COMPLETE"
@@ -1456,4 +1726,5 @@ def main():
 
 
 if __name__ == "__main__":
+
     main()
