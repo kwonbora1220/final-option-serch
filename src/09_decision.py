@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 from datetime import datetime, timezone
 
@@ -43,25 +45,6 @@ OUTPUT_FILE = os.path.join(
 )
 
 
-# ============================================================
-# WEIGHTS
-# ============================================================
-
-MARKET_WEIGHT = 20.0
-FLOW_WEIGHT = 25.0
-DIRECTION_WEIGHT = 20.0
-STRUCTURE_WEIGHT = 10.0
-PRICE_WEIGHT = 15.0
-INDEX_WEIGHT = 10.0
-
-ENTER_THRESHOLD = 75.0
-WATCH_THRESHOLD = 55.0
-
-
-# ============================================================
-# HELPERS
-# ============================================================
-
 def log(message):
 
     now = datetime.now(
@@ -75,117 +58,71 @@ def log(message):
     )
 
 
-def find_column(df, candidates):
+def find_col(df, names):
 
-    mapping = {
+    normalized = {
         str(c)
         .strip()
         .lower()
-        .replace(" ", "_")
-        .replace("-", "_"): c
+        .replace(" ", "_"): c
         for c in df.columns
     }
 
-    for candidate in candidates:
+    for name in names:
 
         key = (
-            candidate
+            name
             .strip()
             .lower()
             .replace(" ", "_")
-            .replace("-", "_")
         )
 
-        if key in mapping:
-            return mapping[key]
+        if key in normalized:
+            return normalized[key]
 
     return None
 
 
-def numeric(df, column):
+def numeric(value):
 
-    if column is None:
+    try:
+        value = float(value)
 
-        return pd.Series(
-            np.nan,
-            index=df.index,
-        )
+        if np.isfinite(value):
+            return value
 
-    return pd.to_numeric(
-        df[column],
-        errors="coerce",
+    except Exception:
+        pass
+
+    return np.nan
+
+
+def clamp(value):
+
+    if not np.isfinite(value):
+        return 50.0
+
+    return max(
+        0.0,
+        min(100.0, float(value)),
     )
 
 
-def clean_text(value):
+def text(value):
 
     if pd.isna(value):
         return ""
 
-    return (
-        str(value)
-        .strip()
-        .upper()
-    )
+    return str(value).upper().strip()
 
-
-def clamp(value, low=0, high=100):
-
-    if not np.isfinite(value):
-        return 0.0
-
-    return max(
-        low,
-        min(high, float(value)),
-    )
-
-
-# ============================================================
-# FILE CHECK
-# ============================================================
-
-def check_files():
-
-    files = {
-        "MARKET": MARKET_FILE,
-        "FLOW": FLOW_FILE,
-        "TOP20": TOP20_FILE,
-        "STRUCTURE": STRUCTURE_FILE,
-    }
-
-    for name, path in files.items():
-
-        if not os.path.exists(path):
-
-            raise FileNotFoundError(
-                f"{name} file not found: {path}"
-            )
-
-        print(
-            f"{name:<12}: OK"
-        )
-
-
-# ============================================================
-# MARKET
-# ============================================================
 
 def load_market():
-
-    log(
-        "Loading STEP 1 market regime"
-    )
 
     df = pd.read_csv(
         MARKET_FILE
     )
 
-    if df.empty:
-        raise ValueError(
-            "market_regime.csv is empty"
-        )
-
-    score_col = find_column(
+    score_col = find_col(
         df,
         [
             "market_score",
@@ -195,25 +132,15 @@ def load_market():
     )
 
     if score_col is None:
-        raise ValueError(
-            "market_score column not found"
+        raise RuntimeError(
+            "market_score missing"
         )
 
-    scores = pd.to_numeric(
-        df[score_col],
-        errors="coerce",
-    ).dropna()
-
-    if scores.empty:
-        raise ValueError(
-            "No valid market score"
-        )
-
-    market_score = clamp(
-        float(scores.iloc[-1])
+    score = numeric(
+        df.iloc[-1][score_col]
     )
 
-    regime_col = find_column(
+    regime_col = find_col(
         df,
         [
             "market_regime",
@@ -222,165 +149,52 @@ def load_market():
     )
 
     regime = (
-        clean_text(df[regime_col].iloc[-1])
+        text(df.iloc[-1][regime_col])
         if regime_col
         else "UNKNOWN"
     )
 
-    latest = df.iloc[-1]
-
     directions = {}
 
-    for key in [
+    for name in [
         "ndx_direction",
         "spy_direction",
         "soxx_direction",
         "dia_direction",
     ]:
 
-        column = find_column(
+        col = find_col(
             df,
-            [key],
+            [name],
         )
 
-        if column is None:
-            directions[key] = "UNAVAILABLE"
-        else:
-            directions[key] = clean_text(
-                latest[column]
-            ) or "UNAVAILABLE"
+        directions[name] = (
+            text(df.iloc[-1][col])
+            if col
+            else "UNAVAILABLE"
+        )
 
     return {
-        "market_score": market_score,
+        "market_score": clamp(score),
         "market_regime": regime,
         **directions,
     }
 
 
-# ============================================================
-# FLOW
-# ============================================================
-
-def load_flow():
-
-    log(
-        "Loading unusual flow"
-    )
-
-    df = pd.read_csv(
-        FLOW_FILE
-    )
-
-    if df.empty:
-        raise ValueError(
-            "unusual_flow.csv is empty"
-        )
-
-    ticker_col = find_column(
-        df,
-        [
-            "ticker",
-            "symbol",
-            "underlying",
-            "underlying_symbol",
-        ],
-    )
-
-    if ticker_col is None:
-        raise ValueError(
-            "Ticker column missing in unusual_flow.csv"
-        )
-
-    flow_score_col = find_column(
-        df,
-        [
-            "flow_score",
-            "option_flow_score",
-            "score",
-        ],
-    )
-
-    premium_col = find_column(
-        df,
-        [
-            "premium",
-            "estimated_premium",
-            "estimated_traded_premium",
-            "premium_flow",
-            "total_premium",
-        ],
-    )
-
-    result = pd.DataFrame()
-
-    result["ticker"] = (
-        df[ticker_col]
-        .astype(str)
-        .str.upper()
-        .str.strip()
-    )
-
-    result["flow_score"] = numeric(
-        df,
-        flow_score_col,
-    )
-
-    result["premium"] = numeric(
-        df,
-        premium_col,
-    )
-
-    grouped = (
-        result
-        .groupby(
-            "ticker",
-            as_index=False,
-        )
-        .agg({
-            "flow_score": "max",
-            "premium": "sum",
-        })
-    )
-
-    log(
-        f"FLOW TICKERS : {len(grouped)}"
-    )
-
-    return grouped
-
-
-# ============================================================
-# TOP20
-# ============================================================
-
 def load_top20():
-
-    log(
-        "Loading TOP20"
-    )
 
     df = pd.read_csv(
         TOP20_FILE
     )
 
-    if df.empty:
-        raise ValueError(
-            "top20.csv is empty"
-        )
-
-    ticker_col = find_column(
+    ticker_col = find_col(
         df,
-        [
-            "ticker",
-            "symbol",
-            "underlying",
-            "underlying_symbol",
-        ],
+        ["ticker", "symbol"],
     )
 
     if ticker_col is None:
-        raise ValueError(
-            "TOP20 ticker column missing"
+        raise RuntimeError(
+            "TOP20 ticker missing"
         )
 
     df["ticker"] = (
@@ -390,7 +204,7 @@ def load_top20():
         .str.strip()
     )
 
-    numeric_fields = [
+    for field in [
         "top20_score",
         "max_flow_score",
         "avg_flow_score",
@@ -401,32 +215,27 @@ def load_top20():
         "call_put_imbalance",
         "directional_ratio",
         "top_dte",
-    ]
+    ]:
 
-    for field in numeric_fields:
-
-        col = find_column(
+        col = find_col(
             df,
             [field],
         )
 
         if col:
-            df[field] = numeric(
-                df,
-                col,
+            df[field] = pd.to_numeric(
+                df[col],
+                errors="coerce",
             )
         else:
             df[field] = np.nan
 
-    text_fields = [
+    for field in [
         "flow_direction",
         "estimated_direction",
-        "selection_reason",
-    ]
+    ]:
 
-    for field in text_fields:
-
-        col = find_column(
+        col = find_col(
             df,
             [field],
         )
@@ -436,65 +245,94 @@ def load_top20():
                 df[col]
                 .fillna("")
                 .astype(str)
-                .str.strip()
                 .str.upper()
+                .str.strip()
             )
         else:
             df[field] = ""
 
-    df = (
+    return (
         df
-        .drop_duplicates(
-            "ticker"
-        )
+        .drop_duplicates("ticker")
         .head(20)
-        .reset_index(drop=True)
     )
 
-    log(
-        f"TOP20 TICKERS : {len(df)}"
+
+def load_flow():
+
+    df = pd.read_csv(
+        FLOW_FILE
     )
 
-    return df
+    ticker_col = find_col(
+        df,
+        ["ticker", "symbol"],
+    )
 
+    score_col = find_col(
+        df,
+        [
+            "flow_score",
+            "option_flow_score",
+            "score",
+        ],
+    )
 
-# ============================================================
-# STRUCTURE
-# ============================================================
+    if ticker_col is None:
+        raise RuntimeError(
+            "FLOW ticker missing"
+        )
+
+    df["ticker"] = (
+        df[ticker_col]
+        .astype(str)
+        .str.upper()
+        .str.strip()
+    )
+
+    if score_col:
+
+        df["flow_value"] = pd.to_numeric(
+            df[score_col],
+            errors="coerce",
+        )
+
+    else:
+
+        df["flow_value"] = np.nan
+
+    return (
+        df
+        .groupby(
+            "ticker",
+            as_index=False,
+        )
+        .agg(
+            flow_score=(
+                "flow_value",
+                "max",
+            )
+        )
+    )
+
 
 def load_structure():
-
-    log(
-        "Loading STEP 8 structure"
-    )
 
     df = pd.read_csv(
         STRUCTURE_FILE
     )
 
-    if df.empty:
-        raise ValueError(
-            "structure.csv is empty"
-        )
-
-    ticker_col = find_column(
+    ticker_col = find_col(
         df,
-        [
-            "ticker",
-            "symbol",
-            "underlying",
-            "underlying_symbol",
-        ],
+        ["ticker", "symbol"],
     )
 
     if ticker_col is None:
-        raise ValueError(
-            "Structure ticker column missing"
+        raise RuntimeError(
+            "STRUCTURE ticker missing"
         )
 
-    result = pd.DataFrame()
-
-    result["ticker"] = (
+    df["ticker"] = (
         df[ticker_col]
         .astype(str)
         .str.upper()
@@ -514,135 +352,149 @@ def load_structure():
 
     for field in numeric_fields:
 
-        col = find_column(
-            df,
-            [field],
-        )
-
-        result[field] = numeric(
-            df,
-            col,
-        )
-
-    text_fields = [
-        "structure",
-        "price_location",
-        "gex_structure",
-        "wall_structure",
-    ]
-
-    for field in text_fields:
-
-        col = find_column(
+        col = find_col(
             df,
             [field],
         )
 
         if col:
+            df[field] = pd.to_numeric(
+                df[col],
+                errors="coerce",
+            )
+        else:
+            df[field] = np.nan
 
-            result[field] = (
+    for field in [
+        "structure",
+        "price_location",
+        "gex_structure",
+        "wall_structure",
+    ]:
+
+        col = find_col(
+            df,
+            [field],
+        )
+
+        if col:
+            df[field] = (
                 df[col]
                 .fillna("")
                 .astype(str)
-                .str.strip()
                 .str.upper()
+                .str.strip()
             )
-
         else:
+            df[field] = ""
 
-            result[field] = ""
-
-    result = (
-        result
-        .drop_duplicates(
-            "ticker"
-        )
+    return (
+        df
+        .drop_duplicates("ticker")
     )
 
-    log(
-        f"STRUCTURE ROWS : {len(result)}"
-    )
-
-    return result
-
-
-# ============================================================
-# DIRECTION SCORE
-# ============================================================
 
 def direction_score(row):
 
-    direction = clean_text(
-        row.get(
-            "estimated_direction",
-            ""
-        )
+    direction = text(
+        row["estimated_direction"]
     )
 
-    flow_direction = clean_text(
-        row.get(
-            "flow_direction",
-            ""
-        )
+    flow_direction = text(
+        row["flow_direction"]
     )
 
-    directional_ratio = row.get(
-        "directional_ratio",
-        np.nan,
+    ratio = numeric(
+        row["directional_ratio"]
     )
 
-    # TOP20의 estimated direction이 존재하면 우선 사용
     if "BUY" in direction:
-        base = 90.0
+        base = 80.0
+
     elif "SELL" in direction:
         base = 20.0
+
     elif "MIXED" in direction:
         base = 50.0
+
     else:
         base = 50.0
 
-    # directional ratio가 있으면 보정
-    if np.isfinite(directional_ratio):
+    if np.isfinite(ratio):
 
-        ratio_score = clamp(
-            float(directional_ratio)
-        )
+        ratio = clamp(ratio)
 
         base = (
             base * 0.65
             +
-            ratio_score * 0.35
+            ratio * 0.35
         )
 
-    # flow direction 보정
     if "CALL DOMINANT" in flow_direction:
         base += 5
 
-    elif "PUT DOMINANT" in flow_direction:
+    if "PUT DOMINANT" in flow_direction:
         base -= 5
 
     return clamp(base)
 
 
-# ============================================================
-# PRICE SCORE
-# ============================================================
+def structure_score(row):
+
+    structure = text(
+        row["structure"]
+    )
+
+    wall = text(
+        row["wall_structure"]
+    )
+
+    gex = text(
+        row["gex_structure"]
+    )
+
+    if structure == "BULLISH":
+        score = 85.0
+
+    elif structure == "BEARISH":
+        score = 20.0
+
+    elif "POSITIVE GEX" in structure:
+        score = 68.0
+
+    elif "NEGATIVE GEX" in structure:
+        score = 32.0
+
+    else:
+        score = 50.0
+
+    if wall == "BULLISH BREAKOUT":
+        score += 10
+
+    elif wall == "BEARISH BREAKDOWN":
+        score -= 10
+
+    if gex == "POSITIVE GEX":
+        score += 5
+
+    elif gex == "NEGATIVE GEX":
+        score -= 5
+
+    return clamp(score)
+
 
 def price_score(row):
 
-    price = row.get(
-        "current_price",
-        np.nan,
+    price = numeric(
+        row["current_price"]
     )
 
-    support = row.get(
-        "support",
-        np.nan,
+    support = numeric(
+        row["support"]
     )
 
-    resistance = row.get(
-        "resistance",
-        np.nan,
+    resistance = numeric(
+        row["resistance"]
     )
 
     if not np.isfinite(price):
@@ -652,93 +504,34 @@ def price_score(row):
 
     if np.isfinite(support):
 
-        distance = (
+        d = (
             price - support
         ) / price
 
-        if 0 <= distance <= 0.03:
-            score += 15
+        if 0 <= d <= 0.02:
+            score += 12
 
-        elif distance > 0:
-            score += 8
+        elif d > 0:
+            score += 5
 
     if np.isfinite(resistance):
 
-        distance = (
+        d = (
             resistance - price
         ) / price
 
-        if 0 <= distance <= 0.03:
-            score += 10
+        if 0 <= d <= 0.02:
+            score += 8
 
-        elif distance > 0:
-            score += 5
-
-    return clamp(score)
-
-
-# ============================================================
-# STRUCTURE SCORE
-# ============================================================
-
-def structure_score(row):
-
-    structure = clean_text(
-        row.get(
-            "structure",
-            ""
-        )
-    )
-
-    wall = clean_text(
-        row.get(
-            "wall_structure",
-            ""
-        )
-    )
-
-    gex = clean_text(
-        row.get(
-            "gex_structure",
-            ""
-        )
-    )
-
-    # 기본값: neutral
-    score = 50.0
-
-    if structure == "BULLISH":
-        score = 90.0
-
-    elif structure == "BEARISH":
-        score = 20.0
-
-    elif structure == "NEUTRAL":
-        score = 55.0
-
-    if wall == "BULLISH BREAKOUT":
-        score += 8
-
-    elif wall == "BEARISH BREAKDOWN":
-        score -= 8
-
-    # GEX unavailable은 중립 처리
-    if gex == "POSITIVE GEX":
-        score += 3
-
-    elif gex == "NEGATIVE GEX":
-        score -= 3
+        elif d > 0:
+            score += 4
 
     return clamp(score)
 
-
-# ============================================================
-# INDEX ALIGNMENT
-# ============================================================
 
 def index_score(market):
 
-    directions = [
+    values = [
         market["ndx_direction"],
         market["spy_direction"],
         market["soxx_direction"],
@@ -746,22 +539,26 @@ def index_score(market):
     ]
 
     bull = sum(
-        "BULL" in x
-        for x in directions
+        "BULL" in value
+        for value in values
     )
 
     bear = sum(
-        "BEAR" in x
-        for x in directions
+        "BEAR" in value
+        for value in values
     )
 
-    neutral = len(directions) - bull - bear
+    neutral = (
+        len(values)
+        - bull
+        - bear
+    )
 
     if bull >= 3 and bear == 0:
-        score = 95.0
+        score = 90.0
 
     elif bull > bear:
-        score = 75.0
+        score = 70.0
 
     elif bear >= 3 and bull == 0:
         score = 20.0
@@ -770,7 +567,7 @@ def index_score(market):
         score = 35.0
 
     else:
-        score = 55.0
+        score = 50.0
 
     return (
         clamp(score),
@@ -780,501 +577,400 @@ def index_score(market):
     )
 
 
-# ============================================================
-# DECISION
-# ============================================================
+def final_decision(
+    score,
+    direction,
+    structure,
+    market_score,
+):
 
-def decide(score, direction, structure):
+    structure = text(
+        structure
+    )
 
-    # --------------------------------------------------------
-    # HARD SAFETY RULE
-    #
-    # 방향성이 매우 약한데 단순 flow 점수 때문에
-    # 진입하는 것을 방지한다.
-    # --------------------------------------------------------
-
+    # 방향성이 매우 약하면 진입 금지
     if direction < 30:
         return "🟡 관망"
 
-    if direction < 20:
+    # 약세 구조는 높은 flow만으로 진입시키지 않음
+    if structure == "BEARISH":
         return "🔴 회피"
 
-    if structure == "BEARISH" and direction < 55:
+    # 시장 자체가 약하면 진입 기준 강화
+    if market_score < 45:
+
+        if score >= 82 and direction >= 70:
+            return "🟡 관망"
+
         return "🔴 회피"
 
-    if score >= ENTER_THRESHOLD:
+    if score >= 75 and direction >= 55:
+        return "🟢 진입"
 
-        # 진입은 최소 방향성 조건을 만족해야 한다.
-        if direction >= 55:
-            return "🟢 진입"
-
-        return "🟡 관망"
-
-    if score >= WATCH_THRESHOLD:
+    if score >= 55:
         return "🟡 관망"
 
     return "🔴 회피"
 
 
-# ============================================================
-# REASON
-# ============================================================
-
-def build_reason(row):
-
-    reasons = []
-
-    if row["flow_score"] >= 85:
-        reasons.append(
-            "Very high option flow"
-        )
-
-    if row["direction_score"] >= 70:
-        reasons.append(
-            "Bullish directional flow"
-        )
-
-    elif row["direction_score"] <= 30:
-        reasons.append(
-            "Weak / bearish directional flow"
-        )
-
-    structure = row["structure"]
-
-    if structure == "BULLISH":
-        reasons.append(
-            "Bullish structure"
-        )
-
-    elif structure == "BEARISH":
-        reasons.append(
-            "Bearish structure"
-        )
-
-    else:
-        reasons.append(
-            "Neutral structure"
-        )
-
-    if row["index_score"] >= 75:
-        reasons.append(
-            "Index alignment bullish"
-        )
-
-    return " | ".join(reasons)
-
-
-# ============================================================
-# MAIN
-# ============================================================
-
 def main():
 
-    print()
-    print("=" * 78)
-    print("STEP 9 INPUT CHECK")
-    print("=" * 78)
+    log("START")
 
-    check_files()
+    for path in [
+        MARKET_FILE,
+        FLOW_FILE,
+        TOP20_FILE,
+        STRUCTURE_FILE,
+    ]:
 
-    print()
-    print("=" * 78)
-    print("RUN STEP 9 DECISION")
-    print("=" * 78)
+        if not os.path.exists(path):
+            raise FileNotFoundError(path)
 
     market = load_market()
-    flow = load_flow()
     top20 = load_top20()
+    flow = load_flow()
     structure = load_structure()
 
-    merged = (
-        top20
-        .merge(
-            flow,
-            on="ticker",
-            how="left",
-            suffixes=(
-                "",
-                "_flow",
-            ),
-        )
-        .merge(
-            structure,
-            on="ticker",
-            how="left",
-            suffixes=(
-                "",
-                "_structure",
-            ),
-        )
-    )
+    market_component = market["market_score"]
 
-    idx_score, bull, bear, neutral = index_score(
-        market
+    index_component, bull, bear, neutral = (
+        index_score(market)
     )
 
     rows = []
 
-    for _, source in merged.iterrows():
+    for rank, top in enumerate(
+        top20.to_dict("records"),
+        start=1,
+    ):
 
-        ticker = source["ticker"]
+        ticker = top["ticker"]
 
-        flow_value = source.get(
-            "max_flow_score",
-            np.nan,
-        )
+        flow_row = flow[
+            flow["ticker"] == ticker
+        ]
 
-        if not np.isfinite(flow_value):
+        structure_row = structure[
+            structure["ticker"] == ticker
+        ]
 
-            flow_value = source.get(
-                "flow_score",
-                np.nan,
+        if flow_row.empty:
+            flow_score = numeric(
+                top["max_flow_score"]
+            )
+        else:
+            flow_score = numeric(
+                flow_row.iloc[0]["flow_score"]
             )
 
-        flow_value = clamp(
-            float(flow_value)
-            if np.isfinite(flow_value)
-            else 0
-        )
+        if not np.isfinite(flow_score):
+            flow_score = numeric(
+                top["avg_flow_score"]
+            )
+
+        if not np.isfinite(flow_score):
+            flow_score = 50.0
+
+        if structure_row.empty:
+            s = {
+                "current_price": np.nan,
+                "call_wall": np.nan,
+                "put_wall": np.nan,
+                "support": np.nan,
+                "resistance": np.nan,
+                "net_gex": np.nan,
+                "structure": "NO DATA",
+                "price_location": "",
+                "gex_structure": "GEX UNAVAILABLE",
+                "wall_structure": "WALL UNAVAILABLE",
+            }
+
+        else:
+            s = structure_row.iloc[0].to_dict()
 
         direction = direction_score(
-            source
+            top
         )
 
-        structure_value = structure_score(
-            source
+        structure_component = structure_score(
+            s
         )
 
-        price_value = price_score(
-            source
+        price_component = price_score(
+            s
         )
 
-        market_value = market["market_score"]
-
-        # ----------------------------------------------------
-        # FINAL SCORE
-        # ----------------------------------------------------
-
-        final_score = (
-            market_value * MARKET_WEIGHT / 100
-            +
-            flow_value * FLOW_WEIGHT / 100
-            +
-            direction * DIRECTION_WEIGHT / 100
-            +
-            structure_value * STRUCTURE_WEIGHT / 100
-            +
-            price_value * PRICE_WEIGHT / 100
-            +
-            idx_score * INDEX_WEIGHT / 100
+        # TOP20의 score가 존재하면 보조적으로 사용
+        top20_score = numeric(
+            top["top20_score"]
         )
 
-        final_score = clamp(
-            final_score
-        )
-
-        structure_text = clean_text(
-            source.get(
-                "structure",
-                ""
+        if np.isfinite(top20_score):
+            top20_component = clamp(
+                top20_score
             )
+        else:
+            top20_component = flow_score
+
+        # 최종 점수
+        #
+        # Market       20
+        # Flow         25
+        # Direction    20
+        # Structure    10
+        # Price        15
+        # Index        10
+
+        score = (
+            market_component * 0.20
+            +
+            flow_score * 0.25
+            +
+            direction * 0.20
+            +
+            structure_component * 0.10
+            +
+            price_component * 0.15
+            +
+            index_component * 0.10
         )
 
-        decision = decide(
-            final_score,
+        score = clamp(score)
+
+        decision = final_decision(
+            score,
             direction,
-            structure_text,
+            s["structure"],
+            market_component,
         )
 
-        row = {
-            "ticker": ticker,
-            "market_score": market_value,
-            "market_regime": market["market_regime"],
-            "ndx_direction": market["ndx_direction"],
-            "spy_direction": market["spy_direction"],
-            "soxx_direction": market["soxx_direction"],
-            "dia_direction": market["dia_direction"],
+        reasons = []
 
-            "top20_score": source.get(
-                "top20_score",
-                np.nan,
-            ),
+        if market_component >= 70:
+            reasons.append(
+                "Strong market regime"
+            )
 
-            "max_flow_score": source.get(
-                "max_flow_score",
-                np.nan,
-            ),
+        elif market_component < 45:
+            reasons.append(
+                "Weak market regime"
+            )
 
-            "avg_flow_score": source.get(
-                "avg_flow_score",
-                np.nan,
-            ),
+        if flow_score >= 80:
+            reasons.append(
+                "Very high option flow"
+            )
 
-            "total_volume": source.get(
-                "total_volume",
-                np.nan,
-            ),
+        elif flow_score >= 65:
+            reasons.append(
+                "Strong option flow"
+            )
 
-            "total_premium": source.get(
-                "total_premium",
-                np.nan,
-            ),
+        if direction >= 70:
+            reasons.append(
+                "Bullish direction"
+            )
 
-            "call_premium": source.get(
-                "call_premium",
-                np.nan,
-            ),
+        elif direction < 30:
+            reasons.append(
+                "Weak direction"
+            )
 
-            "put_premium": source.get(
-                "put_premium",
-                np.nan,
-            ),
+        if (
+            "BULLISH"
+            in text(s["structure"])
+        ):
+            reasons.append(
+                "Bullish structure"
+            )
 
-            "call_put_imbalance": source.get(
-                "call_put_imbalance",
-                np.nan,
-            ),
+        elif (
+            "BEARISH"
+            in text(s["structure"])
+        ):
+            reasons.append(
+                "Bearish structure"
+            )
 
-            "directional_ratio": source.get(
-                "directional_ratio",
-                np.nan,
-            ),
+        if (
+            "POSITIVE GEX"
+            in text(s["gex_structure"])
+        ):
+            reasons.append(
+                "Positive GEX"
+            )
 
-            "flow_direction": source.get(
-                "flow_direction",
-                "",
-            ),
+        elif (
+            "NEGATIVE GEX"
+            in text(s["gex_structure"])
+        ):
+            reasons.append(
+                "Negative GEX"
+            )
 
-            "estimated_direction": source.get(
-                "estimated_direction",
-                "",
-            ),
+        if not reasons:
+            reasons.append(
+                "Mixed structure"
+            )
 
-            "top_dte": source.get(
-                "top_dte",
-                np.nan,
-            ),
-
-            "flow_score": flow_value,
-
-            "effective_flow_score": flow_value,
-
-            "current_price": source.get(
-                "current_price",
-                np.nan,
-            ),
-
-            "call_wall": source.get(
-                "call_wall",
-                np.nan,
-            ),
-
-            "put_wall": source.get(
-                "put_wall",
-                np.nan,
-            ),
-
-            "support": source.get(
-                "support",
-                np.nan,
-            ),
-
-            "resistance": source.get(
-                "resistance",
-                np.nan,
-            ),
-
-            "call_gex": source.get(
-                "call_gex",
-                np.nan,
-            ),
-
-            "put_gex": source.get(
-                "put_gex",
-                np.nan,
-            ),
-
-            "net_gex": source.get(
-                "net_gex",
-                np.nan,
-            ),
-
-            "gex_source": (
-                "CALCULATED"
-            ),
-
-            "structure": structure_text,
-
-            "price_location": source.get(
-                "price_location",
-                "",
-            ),
-
-            "gex_structure": source.get(
-                "gex_structure",
-                "",
-            ),
-
-            "wall_structure": source.get(
-                "wall_structure",
-                "",
-            ),
-
-            "market_component": (
-                market_value
-                * MARKET_WEIGHT
-                / 100
-            ),
-
-            "flow_component": (
-                flow_value
-                * FLOW_WEIGHT
-                / 100
-            ),
-
-            "direction_component": (
-                direction
-                * DIRECTION_WEIGHT
-                / 100
-            ),
-
-            "structure_component": (
-                structure_value
-                * STRUCTURE_WEIGHT
-                / 100
-            ),
-
-            "price_component": (
-                price_value
-                * PRICE_WEIGHT
-                / 100
-            ),
-
-            "index_component": (
-                idx_score
-                * INDEX_WEIGHT
-                / 100
-            ),
-
-            "direction_score": direction,
-
-            "structure_score": structure_value,
-
-            "price_score": price_value,
-
-            "index_score": idx_score,
-
-            "decision_score": final_score,
-
-            "decision": decision,
-
-            "reason": "",
-
-            "data_source": "CALCULATED",
-        }
-
-        row["reason"] = build_reason(
-            row
+        rows.append(
+            {
+                "rank": rank,
+                "ticker": ticker,
+                "market_score": round(
+                    market_component,
+                    2,
+                ),
+                "market_regime": market[
+                    "market_regime"
+                ],
+                "ndx_direction": market[
+                    "ndx_direction"
+                ],
+                "spy_direction": market[
+                    "spy_direction"
+                ],
+                "soxx_direction": market[
+                    "soxx_direction"
+                ],
+                "dia_direction": market[
+                    "dia_direction"
+                ],
+                "top20_score": top20_component,
+                "flow_score": round(
+                    flow_score,
+                    2,
+                ),
+                "direction_score": round(
+                    direction,
+                    2,
+                ),
+                "structure_score": round(
+                    structure_component,
+                    2,
+                ),
+                "price_score": round(
+                    price_component,
+                    2,
+                ),
+                "index_score": round(
+                    index_component,
+                    2,
+                ),
+                "current_price": s[
+                    "current_price"
+                ],
+                "call_wall": s[
+                    "call_wall"
+                ],
+                "put_wall": s[
+                    "put_wall"
+                ],
+                "support": s[
+                    "support"
+                ],
+                "resistance": s[
+                    "resistance"
+                ],
+                "call_gex": s.get(
+                    "call_gex",
+                    np.nan,
+                ),
+                "put_gex": s.get(
+                    "put_gex",
+                    np.nan,
+                ),
+                "net_gex": s.get(
+                    "net_gex",
+                    np.nan,
+                ),
+                "structure": s[
+                    "structure"
+                ],
+                "price_location": s[
+                    "price_location"
+                ],
+                "gex_structure": s[
+                    "gex_structure"
+                ],
+                "wall_structure": s[
+                    "wall_structure"
+                ],
+                "index_bull": bull,
+                "index_bear": bear,
+                "index_neutral": neutral,
+                "decision_score": round(
+                    score,
+                    2,
+                ),
+                "decision": decision,
+                "reason": " | ".join(
+                    reasons
+                ),
+                "data_source": "CALCULATED",
+            }
         )
 
-        rows.append(row)
+    output = pd.DataFrame(rows)
 
-        print(
-            f"[09 DECISION] {ticker} | "
-            f"FLOW {flow_value:.1f} | "
-            f"DIRECTION {direction:.1f} | "
-            f"STRUCTURE {structure_value:.1f} | "
-            f"PRICE {price_value:.1f} | "
-            f"FINAL {final_score:.2f} | "
-            f"{decision}"
+    if len(output) != 20:
+        raise RuntimeError(
+            "STEP 9 must produce 20 rows"
         )
 
-    result = pd.DataFrame(rows)
-
-    # 최종 rank는 결정점수 기준
-    result = (
-        result
-        .sort_values(
-            "decision_score",
-            ascending=False,
+    if output["ticker"].nunique() != 20:
+        raise RuntimeError(
+            "Duplicate ticker detected"
         )
-        .reset_index(drop=True)
-    )
 
-    result["final_rank"] = (
-        result.index + 1
-    )
+    if (
+        output["decision_score"]
+        .isna()
+        .any()
+    ):
+        raise RuntimeError(
+            "decision_score contains NaN"
+        )
 
-    OUTPUT_DIR = os.path.dirname(
-        OUTPUT_FILE
-    )
+    if (
+        (output["decision_score"] < 0)
+        |
+        (output["decision_score"] > 100)
+    ).any():
+        raise RuntimeError(
+            "decision_score outside 0-100"
+        )
 
-    os.makedirs(
-        OUTPUT_DIR,
-        exist_ok=True,
-    )
-
-    result.to_csv(
+    output.to_csv(
         OUTPUT_FILE,
         index=False,
     )
 
     print()
+    print("STEP 9 DECISION COMPLETE")
+    print()
     print(
-        f"MARKET SCORE       : "
-        f"{market['market_score']:.2f}"
-    )
-
-    print(
-        f"MARKET REGIME      : "
-        f"{market['market_regime']}"
-    )
-
-    print(
-        f"TOP20 INPUT        : "
-        f"{len(top20)}"
-    )
-
-    print(
-        f"DECISION ROWS      : "
-        f"{len(result)}"
-    )
-
-    print(
-        f"UNIQUE TICKERS     : "
-        f"{result['ticker'].nunique()}"
-    )
-
-    print(
-        f"VALID SCORES       : "
-        f"{result['decision_score'].notna().sum()}"
-    )
-
-    print(
-        f"VALID DECISIONS    : "
-        f"{result['decision'].notna().sum()}"
+        output[
+            [
+                "rank",
+                "ticker",
+                "direction_score",
+                "decision_score",
+                "decision",
+            ]
+        ].to_string(index=False)
     )
 
     print()
     print("DECISION SUMMARY")
-
     print(
-        result["decision"]
-        .value_counts(
-            dropna=False
-        )
-        .to_string()
+        output[
+            "decision"
+        ].value_counts()
     )
 
-    print()
-    print(
-        f"OUTPUT FILE : "
-        f"{OUTPUT_FILE}"
-    )
-
-    print(
-        "STEP 9 OUTPUT : OK"
-    )
+    print("STEP 9 OUTPUT : OK")
 
 
 if __name__ == "__main__":
