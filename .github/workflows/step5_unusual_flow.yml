@@ -1,27 +1,422 @@
-  - name: Push Step 5 Data
-    run: |
+name: STEP 5 - Unusual Option Flow
 
-      set -e
+on:
+  workflow_dispatch:
 
-      echo "=========================================="
-      echo "SYNC WITH REMOTE MAIN"
-      echo "=========================================="
+concurrency:
+  group: option-scanner-step5
+  cancel-in-progress: false
 
-      echo "GIT STATUS BEFORE SYNC"
-      git status --short
+jobs:
+  unusual-flow:
+    runs-on: ubuntu-latest
 
-      # STEP 4 local-only generated file
-      rm -f data/analysis/options_greeks.csv
+    steps:
 
-      echo "GIT STATUS AFTER CLEANUP"
-      git status --short
+      # ============================================================
+      # 1. CHECKOUT
+      # ============================================================
 
-      git fetch origin main
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      git rebase origin/main
+      # ============================================================
+      # 2. PYTHON
+      # ============================================================
 
-      echo "=========================================="
-      echo "PUSH STEP 5 DATA"
-      echo "=========================================="
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-      git push origin HEAD:main
+      # ============================================================
+      # 3. DEPENDENCIES
+      # ============================================================
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # ============================================================
+      # 4. CHECK CURRENT NORMALIZED DATA
+      # ============================================================
+
+      - name: Check Normalized Data
+        run: |
+
+          echo "=========================================="
+          echo "STEP 3 INPUT CHECK"
+          echo "=========================================="
+
+          test -f data/normalized/options_normalized.csv
+
+          python - <<'PY'
+          import pandas as pd
+
+          file = "data/normalized/options_normalized.csv"
+
+          df = pd.read_csv(file)
+
+          rows = len(df)
+          tickers = df["symbol"].nunique()
+
+          print("ROWS       :", rows)
+          print("COLUMNS    :", len(df.columns))
+          print("TICKERS    :", tickers)
+          print("DTE MIN    :", df["DTE"].min())
+          print("DTE MAX    :", df["DTE"].max())
+
+          if rows < 100000:
+              raise RuntimeError(
+                  f"Normalized dataset is too small: {rows}"
+              )
+
+          if tickers < 500:
+              raise RuntimeError(
+                  f"Option universe is too small: {tickers}"
+              )
+
+          print("NORMALIZED DATA : OK")
+          PY
+
+      # ============================================================
+      # 5. REMOVE OLD LOCAL GREEKS
+      #
+      # IMPORTANT:
+      # options_greeks.csv is LOCAL ONLY.
+      # Never use an old repository copy.
+      # ============================================================
+
+      - name: Remove Old Local Greeks
+        run: |
+
+          echo "=========================================="
+          echo "REMOVE OLD LOCAL GREEKS"
+          echo "=========================================="
+
+          rm -f data/analysis/options_greeks.csv
+
+          if [ -f data/analysis/options_greeks.csv ]; then
+            echo "ERROR: Old Greeks file still exists."
+            exit 1
+          fi
+
+          echo "OLD GREEKS : REMOVED"
+
+      # ============================================================
+      # 6. REBUILD CURRENT GREEKS
+      # ============================================================
+
+      - name: Rebuild Current Greeks
+        run: |
+
+          echo "=========================================="
+          echo "REBUILD CURRENT STEP 4 GREEKS"
+          echo "=========================================="
+
+          python src/04_greeks.py
+
+      # ============================================================
+      # 7. VERIFY CURRENT GREEKS
+      # ============================================================
+
+      - name: Verify Current Greeks
+        run: |
+
+          echo "=========================================="
+          echo "CURRENT GREEKS CHECK"
+          echo "=========================================="
+
+          test -f data/analysis/options_greeks.csv
+
+          python - <<'PY'
+          import os
+          import pandas as pd
+
+          file = "data/analysis/options_greeks.csv"
+
+          df = pd.read_csv(file)
+
+          rows = len(df)
+          tickers = df["symbol"].nunique()
+
+          print("FILE SIZE  :", os.path.getsize(file))
+          print("ROWS       :", rows)
+          print("COLUMNS    :", len(df.columns))
+          print("TICKERS    :", tickers)
+          print("DTE MIN    :", df["DTE"].min())
+          print("DTE MAX    :", df["DTE"].max())
+          print("VALID DELTA:", df["delta"].notna().sum())
+          print("VALID GAMMA:", df["gamma"].notna().sum())
+          print("VALID VEGA :", df["vega"].notna().sum())
+
+          if rows < 100000:
+              raise RuntimeError(
+                  f"Greeks dataset is too small: {rows}"
+              )
+
+          if tickers < 500:
+              raise RuntimeError(
+                  f"Greeks ticker count is too small: {tickers}"
+              )
+
+          print("CURRENT GREEKS : OK")
+          PY
+
+      # ============================================================
+      # 8. RUN STEP 5
+      # ============================================================
+
+      - name: Run Unusual Flow Engine
+        run: |
+
+          echo "=========================================="
+          echo "RUN STEP 5 UNUSUAL FLOW"
+          echo "=========================================="
+
+          python src/05_unusual_flow.py
+
+      # ============================================================
+      # 9. VERIFY STEP 5 OUTPUT
+      # ============================================================
+
+      - name: Check Unusual Flow Output
+        run: |
+
+          echo "=========================================="
+          echo "STEP 5 OUTPUT CHECK"
+          echo "=========================================="
+
+          test -f data/analysis/unusual_flow.csv
+
+          python - <<'PY'
+          import pandas as pd
+
+          file = "data/analysis/unusual_flow.csv"
+
+          df = pd.read_csv(file)
+
+          rows = len(df)
+          tickers = df["symbol"].nunique()
+          flow_scores = df["flow_score"].notna().sum()
+
+          buy_est = (
+              df["trade_side_estimate"] == "BUY EST."
+          ).sum()
+
+          sell_est = (
+              df["trade_side_estimate"] == "SELL EST."
+          ).sum()
+
+          print("ROWS        :", rows)
+          print("COLUMNS     :", len(df.columns))
+          print("TICKERS     :", tickers)
+          print("FLOW SCORE  :", flow_scores)
+          print("BUY EST.    :", buy_est)
+          print("SELL EST.   :", sell_est)
+          print("DTE MIN     :", df["DTE"].min())
+          print("DTE MAX     :", df["DTE"].max())
+
+          if rows < 100000:
+              raise RuntimeError(
+                  f"Unusual flow row count too small: {rows}"
+              )
+
+          if tickers < 500:
+              raise RuntimeError(
+                  f"Unusual flow ticker count too small: {tickers}"
+              )
+
+          if flow_scores != rows:
+              raise RuntimeError(
+                  "Invalid flow_score rows detected."
+              )
+
+          print("STEP 5 OUTPUT : OK")
+          PY
+
+      # ============================================================
+      # 10. REMOVE LOCAL-ONLY GREEKS BEFORE GIT
+      #
+      # IMPORTANT:
+      # Never commit options_greeks.csv.
+      # ============================================================
+
+      - name: Remove Local Greeks Before Git
+        run: |
+
+          echo "=========================================="
+          echo "REMOVE LOCAL-ONLY FILES"
+          echo "=========================================="
+
+          rm -f data/analysis/options_greeks.csv
+
+          if [ -f data/analysis/options_greeks.csv ]; then
+            echo "ERROR: options_greeks.csv still exists."
+            exit 1
+          fi
+
+          echo "LOCAL GREEKS : REMOVED"
+
+      # ============================================================
+      # 11. GIT STATUS CHECK
+      # ============================================================
+
+      - name: Git Status Check
+        run: |
+
+          echo "=========================================="
+          echo "GIT STATUS CHECK"
+          echo "=========================================="
+
+          git status --short
+
+      # ============================================================
+      # 12. COMMIT STEP 5 OUTPUT
+      # ============================================================
+
+      - name: Commit Step 5 Data
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "COMMIT STEP 5 DATA"
+          echo "=========================================="
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add data/analysis/unusual_flow.csv
+
+          if git diff --cached --quiet; then
+            echo "NO CHANGES TO COMMIT"
+          else
+            git commit -m "Update unusual option flow analysis"
+            echo "STEP 5 COMMIT CREATED"
+          fi
+
+      # ============================================================
+      # 13. VERIFY WORKTREE
+      # ============================================================
+
+      - name: Verify Clean Worktree
+        run: |
+
+          echo "=========================================="
+          echo "VERIFY CLEAN WORKTREE"
+          echo "=========================================="
+
+          git status --short
+
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "ERROR: Worktree is not clean."
+            git status
+            exit 1
+          fi
+
+          echo "WORKTREE : CLEAN"
+
+      # ============================================================
+      # 14. SYNC WITH REMOTE MAIN
+      # ============================================================
+
+      - name: Sync With Remote Main
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "SYNC WITH REMOTE MAIN"
+          echo "=========================================="
+
+          git fetch origin main
+
+          git rebase origin/main
+
+          echo "REBASE : OK"
+
+      # ============================================================
+      # 15. PUSH
+      # ============================================================
+
+      - name: Push Step 5 Data
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "PUSH STEP 5 DATA"
+          echo "=========================================="
+
+          git push origin HEAD:main
+
+          echo "PUSH : OK"
+
+      # ============================================================
+      # 16. ARTIFACT
+      # ============================================================
+
+      - name: Upload Unusual Flow Data
+        uses: actions/upload-artifact@v4
+        with:
+          name: step5-unusual-flow-output
+          path: data/analysis/unusual_flow.csv
+          retention-days: 1
+
+      # ============================================================
+      # 17. FINAL VERIFICATION
+      # ============================================================
+
+      - name: STEP 5 Final Verification
+        run: |
+
+          echo "=========================================="
+          echo "FINAL STEP 5 VERIFICATION"
+          echo "=========================================="
+
+          test -f data/analysis/unusual_flow.csv
+
+          python - <<'PY'
+          import os
+          import pandas as pd
+
+          file = "data/analysis/unusual_flow.csv"
+
+          df = pd.read_csv(file)
+
+          rows = len(df)
+          tickers = df["symbol"].nunique()
+
+          print()
+          print("==========================================")
+          print("FINAL OPTION FLOW RESULT")
+          print("==========================================")
+          print("FILE SIZE       :", os.path.getsize(file))
+          print("ROWS            :", rows)
+          print("COLUMNS         :", len(df.columns))
+          print("TICKERS         :", tickers)
+          print("FLOW SCORE      :", df["flow_score"].notna().sum())
+          print("DTE MIN         :", df["DTE"].min())
+          print("DTE MAX         :", df["DTE"].max())
+          print("==========================================")
+
+          if rows < 100000:
+              raise RuntimeError(
+                  f"STEP 5 output is too small: {rows}"
+              )
+
+          if tickers < 500:
+              raise RuntimeError(
+                  f"STEP 5 ticker count is too small: {tickers}"
+              )
+
+          if df["flow_score"].notna().sum() != rows:
+              raise RuntimeError(
+                  "Invalid flow_score rows detected."
+              )
+
+          print("STEP 5 STATUS : PASS")
+          print("STEP 5 OUTPUT : VERIFIED")
+          PY
