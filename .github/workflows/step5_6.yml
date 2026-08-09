@@ -119,7 +119,7 @@ jobs:
 
           print("ROWS       :", len(df))
           print("COLUMNS    :", len(df.columns))
-          print("TICKERS    :", df["ticker"].nunique())
+          print("TICKERS    :", df["symbol"].nunique())
           print("DTE MIN    :", df["DTE"].min())
           print("DTE MAX    :", df["DTE"].max())
 
