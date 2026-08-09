@@ -284,7 +284,7 @@ jobs:
           git status --short
 
       # ============================================================
-      # 12. COMMIT STEP 5 DATA
+      # COMMIT STEP 5 DATA
       # ============================================================
 
       - name: Commit Step 5 Data
@@ -299,14 +299,25 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # STEP 5 output
-          git add data/analysis/unusual_flow.csv
+          # --------------------------------------------------------
+          # Ensure local-only Greeks file is ignored
+          # --------------------------------------------------------
 
-          # .gitignore update
-          git add .gitignore
+          touch .gitignore
 
-          # Record deletion of previously tracked Greeks file
-          git add -u data/analysis/options_greeks.csv
+          grep -qxF "data/analysis/options_greeks.csv" .gitignore || \
+            echo "data/analysis/options_greeks.csv" >> .gitignore
+
+          # --------------------------------------------------------
+          # Stage ALL repository changes
+          #
+          # This safely handles:
+          # - unusual_flow.csv
+          # - .gitignore
+          # - removal of any previously tracked Greeks file
+          # --------------------------------------------------------
+
+          git add -A
 
           echo "=========================================="
           echo "STAGED CHANGES"
@@ -314,13 +325,21 @@ jobs:
 
           git status --short
 
-          if git diff --cached --quiet; then
-            echo "NO CHANGES TO COMMIT"
-          else
-            git commit -m "Update STEP 5 unusual flow and remove local Greeks"
-            echo "STEP 5 COMMIT CREATED"
-          fi
+          # --------------------------------------------------------
+          # Commit only if there are changes
+          # --------------------------------------------------------
 
+          if git diff --cached --quiet; then
+
+            echo "NO CHANGES TO COMMIT"
+
+          else
+
+            git commit -m "Update STEP 5 unusual flow"
+
+            echo "STEP 5 COMMIT CREATED"
+
+          fi
       # ============================================================
       # 13. VERIFY WORKTREE
       # ============================================================
