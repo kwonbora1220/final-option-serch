@@ -236,15 +236,19 @@ jobs:
           print("STEP 5 OUTPUT : OK")
           PY
 
+
       # ============================================================
-      # 10. REMOVE LOCAL-ONLY GREEKS BEFORE GIT
+      # 10. REMOVE LOCAL-ONLY GREEKS
       #
       # IMPORTANT:
-      # Never commit options_greeks.csv.
+      # options_greeks.csv is generated locally by STEP 4.
+      # It must NOT remain tracked by Git.
       # ============================================================
 
       - name: Remove Local Greeks Before Git
         run: |
+
+          set -e
 
           echo "=========================================="
           echo "REMOVE LOCAL-ONLY FILES"
@@ -252,12 +256,19 @@ jobs:
 
           rm -f data/analysis/options_greeks.csv
 
-          if [ -f data/analysis/options_greeks.csv ]; then
-            echo "ERROR: options_greeks.csv still exists."
-            exit 1
-          fi
+          echo "OPTIONS GREEKS FILE REMOVED FROM WORKSPACE"
 
-          echo "LOCAL GREEKS : REMOVED"
+          # Remove the file from Git tracking if it was
+          # previously tracked.
+          git rm --cached --ignore-unmatch data/analysis/options_greeks.csv
+
+          echo "OPTIONS GREEKS : GIT TRACKING REMOVED"
+
+          # Ensure future runs never track this generated file.
+          grep -qxF "data/analysis/options_greeks.csv" .gitignore 2>/dev/null || \
+            echo "data/analysis/options_greeks.csv" >> .gitignore
+
+          echo "GITIGNORE UPDATED"
 
       # ============================================================
       # 11. GIT STATUS CHECK
