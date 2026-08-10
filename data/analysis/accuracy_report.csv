@@ -1,0 +1,27 @@
+signals,d1_completed,d1_hit_rate,avg_d1_return,avg_d1_mfe,avg_d1_mae,d3_completed,d3_hit_rate,avg_d3_return,avg_d3_mfe,avg_d3_mae,d5_completed,d5_hit_rate,avg_d5_return,median_d5_return,avg_d5_mfe,median_d5_mfe,avg_d5_mae,median_d5_mae,category,group
+20,0,,,,,0,,,,,0,,,,,,,,OVERALL,ALL
+4,0,,,,,0,,,,,0,,,,,,,,DECISION,🟢 진입
+16,0,,,,,0,,,,,0,,,,,,,,DECISION,🟡 관망
+13,0,,,,,0,,,,,0,,,,,,,,SCORE,70-79.99
+7,0,,,,,0,,,,,0,,,,,,,,SCORE,60-69.99
+20,0,,,,,0,,,,,0,,,,,,,,MARKET_REGIME,RISK-ON
+1,0,,,,,0,,,,,0,,,,,,,,TICKER,AAPL
+1,0,,,,,0,,,,,0,,,,,,,,TICKER,AMD
+1,0,,,,,0,,,,,0,,,,,,,,TICKER,AMZN
+1,0,,,,,0,,,,,0,,,,,,,,TICKER,APP
+1,0,,,,,0,,,,,0,,,,,,,,TICKER,C
+1,0,,,,,0,,,,,0,,,,,,,,TICKER,CVS
+1,0,,,,,0,,,,,0,,,,,,,,TICKER,ECHO
+1,0,,,,,0,,,,,0,,,,,,,,TICKER,IBM
+1,0,,,,,0,,,,,0,,,,,,,,TICKER,MCHP
+1,0,,,,,0,,,,,0,,,,,,,,TICKER,MSFT
+1,0,,,,,0,,,,,0,,,,,,,,TICKER,MSTR
+1,0,,,,,0,,,,,0,,,,,,,,TICKER,NVDA
+1,0,,,,,0,,,,,0,,,,,,,,TICKER,PLTR
+1,0,,,,,0,,,,,0,,,,,,,,TICKER,QQQ
+1,0,,,,,0,,,,,0,,,,,,,,TICKER,SPCX
+1,0,,,,,0,,,,,0,,,,,,,,TICKER,SPY
+1,0,,,,,0,,,,,0,,,,,,,,TICKER,TLT
+1,0,,,,,0,,,,,0,,,,,,,,TICKER,TSLA
+1,0,,,,,0,,,,,0,,,,,,,,TICKER,WFC
+1,0,,,,,0,,,,,0,,,,,,,,TICKER,XLK
