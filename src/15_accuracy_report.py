@@ -1,37 +1,15 @@
-```python
 from __future__ import annotations
 
 import os
-import pandas as pd
+
 import numpy as np
+import pandas as pd
 
 
 # ============================================================
 # STEP 15 - ACCURACY REPORT
-#
-# 목적:
-# ------------------------------------------------------------
-# STEP 13 prediction_history.csv
-# STEP 14 performance_history.csv
-#
-# 를 이용하여 옵션분석기의 실제 성과를 누적 분석한다.
-#
-# 분석 항목:
-#
-# 1. D+1 / D+3 / D+5 Hit Rate
-# 2. D+1 / D+3 / D+5 Average Return
-# 3. MFE = Maximum Favorable Excursion
-# 4. MAE = Maximum Adverse Excursion
-# 5. Decision별 성과
-# 6. Score 구간별 성과
-# 7. Market Regime별 성과
-#
 # ============================================================
 
-
-# ============================================================
-# PATH
-# ============================================================
 
 BASE_DIR = os.path.dirname(
     os.path.dirname(
@@ -42,52 +20,37 @@ BASE_DIR = os.path.dirname(
 ANALYSIS_DIR = os.path.join(
     BASE_DIR,
     "data",
-    "analysis"
+    "analysis",
 )
 
-PERFORMANCE_FILE = os.path.join(
-    ANALYSIS_DIR,
-    "performance_history.csv"
-)
 
-PREDICTION_FILE = os.path.join(
+INPUT_FILE = os.path.join(
     ANALYSIS_DIR,
-    "prediction_history.csv"
+    "performance_history.csv",
 )
 
 OUTPUT_FILE = os.path.join(
     ANALYSIS_DIR,
-    "accuracy_report.csv"
+    "accuracy_report.csv",
 )
 
 
 # ============================================================
-# START
+# LOAD
 # ============================================================
 
-print()
-print("=" * 70)
-print("🔥 STEP 15 - ACCURACY REPORT")
-print("=" * 70)
-print()
-
-
-# ============================================================
-# LOAD PERFORMANCE HISTORY
-# ============================================================
 
 if not os.path.exists(
-    PERFORMANCE_FILE
+    INPUT_FILE
 ):
 
     raise RuntimeError(
-        "performance_history.csv not found:\n"
-        + PERFORMANCE_FILE
+        "performance_history.csv not found"
     )
 
 
 df = pd.read_csv(
-    PERFORMANCE_FILE
+    INPUT_FILE
 )
 
 
@@ -98,94 +61,44 @@ if df.empty:
     )
 
 
-print(
-    "PERFORMANCE ROWS :",
-    len(df)
+# ============================================================
+# NORMALIZE
+# ============================================================
+
+
+df["ticker"] = (
+    df["ticker"]
+    .astype(str)
+    .str.upper()
+    .str.strip()
 )
 
 
-# ============================================================
-# OPTIONAL PREDICTION HISTORY
-#
-# performance_history가 prediction_history를
-# 이미 포함하고 있지 않은 경우 보완한다.
-# ============================================================
-
-if os.path.exists(
-    PREDICTION_FILE
-):
-
-    try:
-
-        prediction = pd.read_csv(
-            PREDICTION_FILE
-        )
-
-        if not prediction.empty:
-
-            print(
-                "PREDICTION ROWS  :",
-                len(prediction)
-            )
-
-    except Exception:
-
-        prediction = None
-
-else:
-
-    prediction = None
-
-
-# ============================================================
-# BASIC COLUMN CHECK
-# ============================================================
-
-required_columns = [
-    "ticker",
-    "decision"
-]
-
-
-missing = [
-    column
-    for column in required_columns
-    if column not in df.columns
-]
-
-
-if missing:
+if "decision" not in df.columns:
 
     raise RuntimeError(
-        "Missing required columns: "
-        + ", ".join(missing)
+        "decision column missing"
     )
 
 
 # ============================================================
-# NUMERIC CONVERSION
+# NUMERIC
 # ============================================================
+
 
 numeric_columns = [
 
     "decision_score",
-
     "market_score",
-    "flow_score",
 
-    "signal_price",
-
-    "d1_price",
     "d1_return",
     "d1_mfe",
     "d1_mae",
 
-    "d3_price",
     "d3_return",
     "d3_mfe",
     "d3_mae",
 
-    "d5_price",
     "d5_return",
     "d5_mfe",
     "d5_mae",
@@ -202,333 +115,249 @@ for column in numeric_columns:
 
         df[column] = pd.to_numeric(
             df[column],
-            errors="coerce"
+            errors="coerce",
         )
 
 
 # ============================================================
-# HIT RATE FUNCTION
+# HELPERS
 # ============================================================
 
-def hit_rate(
-    series: pd.Series
-) -> float:
 
-    if series is None:
+def safe_mean(series):
+
+    values = pd.to_numeric(
+        series,
+        errors="coerce",
+    ).dropna()
+
+
+    if values.empty:
+
         return np.nan
 
-    series = series.dropna()
 
-    if len(series) == 0:
+    return float(
+        values.mean()
+    )
+
+
+def safe_median(series):
+
+    values = pd.to_numeric(
+        series,
+        errors="coerce",
+    ).dropna()
+
+
+    if values.empty:
+
         return np.nan
 
-    return (
+
+    return float(
+        values.median()
+    )
+
+
+def hit_rate(series):
+
+    values = pd.to_numeric(
+        series,
+        errors="coerce",
+    ).dropna()
+
+
+    if values.empty:
+
+        return np.nan
+
+
+    return float(
         (
-            series > 0
+            values > 0
         ).mean()
         * 100
     )
 
 
-# ============================================================
-# MEAN FUNCTION
-# ============================================================
+def metrics(subset):
 
-def safe_mean(
-    series: pd.Series
-) -> float:
+    result = {}
 
-    if series is None:
-        return np.nan
-
-    series = pd.to_numeric(
-        series,
-        errors="coerce"
-    ).dropna()
-
-    if len(series) == 0:
-        return np.nan
-
-    return float(
-        series.mean()
+    result["signals"] = len(
+        subset
     )
 
 
-# ============================================================
-# MEDIAN FUNCTION
-# ============================================================
+    # --------------------------------------------------------
+    # D1
+    # --------------------------------------------------------
 
-def safe_median(
-    series: pd.Series
-) -> float:
+    if "d1_return" in subset.columns:
 
-    if series is None:
-        return np.nan
+        result["d1_completed"] = (
+            subset["d1_return"]
+            .notna()
+            .sum()
+        )
 
-    series = pd.to_numeric(
-        series,
-        errors="coerce"
-    ).dropna()
-
-    if len(series) == 0:
-        return np.nan
-
-    return float(
-        series.median()
-    )
-
-
-# ============================================================
-# BUILD METRICS
-# ============================================================
-
-def build_metrics(
-    subset: pd.DataFrame
-) -> dict:
-
-    result = {
-
-        "signals":
-            len(subset),
-
-        # ----------------------------------------------------
-        # D+1
-        # ----------------------------------------------------
-
-        "d1_completed":
-            (
+        result["d1_hit_rate"] = (
+            hit_rate(
                 subset["d1_return"]
-                .notna()
-                .sum()
-                if "d1_return" in subset.columns
-                else 0
-            ),
+            )
+        )
 
-        "d1_hit_rate":
-            (
-                hit_rate(
-                    subset["d1_return"]
-                )
-                if "d1_return" in subset.columns
-                else np.nan
-            ),
+        result["avg_d1_return"] = (
+            safe_mean(
+                subset["d1_return"]
+            )
+        )
 
-        "avg_d1_return":
-            (
-                safe_mean(
-                    subset["d1_return"]
-                )
-                if "d1_return" in subset.columns
-                else np.nan
-            ),
+        result["avg_d1_mfe"] = (
+            safe_mean(
+                subset["d1_mfe"]
+            )
+        )
 
-        "avg_d1_mfe":
-            (
-                safe_mean(
-                    subset["d1_mfe"]
-                )
-                if "d1_mfe" in subset.columns
-                else np.nan
-            ),
+        result["avg_d1_mae"] = (
+            safe_mean(
+                subset["d1_mae"]
+            )
+        )
 
-        "avg_d1_mae":
-            (
-                safe_mean(
-                    subset["d1_mae"]
-                )
-                if "d1_mae" in subset.columns
-                else np.nan
-            ),
 
-        # ----------------------------------------------------
-        # D+3
-        # ----------------------------------------------------
+    # --------------------------------------------------------
+    # D3
+    # --------------------------------------------------------
 
-        "d3_completed":
-            (
+    if "d3_return" in subset.columns:
+
+        result["d3_completed"] = (
+            subset["d3_return"]
+            .notna()
+            .sum()
+        )
+
+        result["d3_hit_rate"] = (
+            hit_rate(
                 subset["d3_return"]
-                .notna()
-                .sum()
-                if "d3_return" in subset.columns
-                else 0
-            ),
+            )
+        )
 
-        "d3_hit_rate":
-            (
-                hit_rate(
-                    subset["d3_return"]
-                )
-                if "d3_return" in subset.columns
-                else np.nan
-            ),
+        result["avg_d3_return"] = (
+            safe_mean(
+                subset["d3_return"]
+            )
+        )
 
-        "avg_d3_return":
-            (
-                safe_mean(
-                    subset["d3_return"]
-                )
-                if "d3_return" in subset.columns
-                else np.nan
-            ),
+        result["avg_d3_mfe"] = (
+            safe_mean(
+                subset["d3_mfe"]
+            )
+        )
 
-        "avg_d3_mfe":
-            (
-                safe_mean(
-                    subset["d3_mfe"]
-                )
-                if "d3_mfe" in subset.columns
-                else np.nan
-            ),
+        result["avg_d3_mae"] = (
+            safe_mean(
+                subset["d3_mae"]
+            )
+        )
 
-        "avg_d3_mae":
-            (
-                safe_mean(
-                    subset["d3_mae"]
-                )
-                if "d3_mae" in subset.columns
-                else np.nan
-            ),
 
-        # ----------------------------------------------------
-        # D+5
-        # ----------------------------------------------------
+    # --------------------------------------------------------
+    # D5
+    # --------------------------------------------------------
 
-        "d5_completed":
-            (
+    if "d5_return" in subset.columns:
+
+        result["d5_completed"] = (
+            subset["d5_return"]
+            .notna()
+            .sum()
+        )
+
+        result["d5_hit_rate"] = (
+            hit_rate(
                 subset["d5_return"]
-                .notna()
-                .sum()
-                if "d5_return" in subset.columns
-                else 0
-            ),
+            )
+        )
 
-        "d5_hit_rate":
-            (
-                hit_rate(
-                    subset["d5_return"]
-                )
-                if "d5_return" in subset.columns
-                else np.nan
-            ),
+        result["avg_d5_return"] = (
+            safe_mean(
+                subset["d5_return"]
+            )
+        )
 
-        "avg_d5_return":
-            (
-                safe_mean(
-                    subset["d5_return"]
-                )
-                if "d5_return" in subset.columns
-                else np.nan
-            ),
+        result["median_d5_return"] = (
+            safe_median(
+                subset["d5_return"]
+            )
+        )
 
-        "median_d5_return":
-            (
-                safe_median(
-                    subset["d5_return"]
-                )
-                if "d5_return" in subset.columns
-                else np.nan
-            ),
+        result["avg_d5_mfe"] = (
+            safe_mean(
+                subset["d5_mfe"]
+            )
+        )
 
-        "avg_d5_mfe":
-            (
-                safe_mean(
-                    subset["d5_mfe"]
-                )
-                if "d5_mfe" in subset.columns
-                else np.nan
-            ),
+        result["median_d5_mfe"] = (
+            safe_median(
+                subset["d5_mfe"]
+            )
+        )
 
-        "median_d5_mfe":
-            (
-                safe_median(
-                    subset["d5_mfe"]
-                )
-                if "d5_mfe" in subset.columns
-                else np.nan
-            ),
+        result["avg_d5_mae"] = (
+            safe_mean(
+                subset["d5_mae"]
+            )
+        )
 
-        "avg_d5_mae":
-            (
-                safe_mean(
-                    subset["d5_mae"]
-                )
-                if "d5_mae" in subset.columns
-                else np.nan
-            ),
+        result["median_d5_mae"] = (
+            safe_median(
+                subset["d5_mae"]
+            )
+        )
 
-        "median_d5_mae":
-            (
-                safe_median(
-                    subset["d5_mae"]
-                )
-                if "d5_mae" in subset.columns
-                else np.nan
-            ),
-
-        # ----------------------------------------------------
-        # Overall MFE / MAE
-        # ----------------------------------------------------
-
-        "avg_mfe":
-            (
-                safe_mean(
-                    subset["mfe"]
-                )
-                if "mfe" in subset.columns
-                else np.nan
-            ),
-
-        "avg_mae":
-            (
-                safe_mean(
-                    subset["mae"]
-                )
-                if "mae" in subset.columns
-                else np.nan
-            ),
-
-    }
 
     return result
 
 
 # ============================================================
-# REPORT ROWS
+# REPORT
 # ============================================================
 
-report_rows = []
+
+rows = []
 
 
 # ============================================================
-# 1. OVERALL
+# OVERALL
 # ============================================================
 
-overall = build_metrics(
+
+overall = metrics(
     df
 )
 
 overall["category"] = "OVERALL"
 overall["group"] = "ALL"
 
-report_rows.append(
+rows.append(
     overall
 )
 
 
 # ============================================================
-# 2. DECISION
+# DECISION
 # ============================================================
-
-print()
-print("=" * 70)
-print("📊 DECISION PERFORMANCE")
-print("=" * 70)
 
 
 for decision in [
+
     "🟢 진입",
     "🟡 관망",
     "🔴 회피",
+
 ]:
 
     subset = df[
@@ -540,29 +369,28 @@ for decision in [
 
 
     if subset.empty:
+
         continue
 
 
-    metrics = build_metrics(
+    row = metrics(
         subset
     )
 
-    metrics["category"] = "DECISION"
-    metrics["group"] = decision
+    row["category"] = (
+        "DECISION"
+    )
 
-    report_rows.append(
-        metrics
+    row["group"] = decision
+
+    rows.append(
+        row
     )
 
 
 # ============================================================
-# 3. SCORE GROUP
+# SCORE GROUP
 # ============================================================
-
-print()
-print("=" * 70)
-print("📊 SCORE PERFORMANCE")
-print("=" * 70)
 
 
 if "decision_score" in df.columns:
@@ -572,31 +400,31 @@ if "decision_score" in df.columns:
         (
             "90-100",
             90,
-            100
+            101,
         ),
 
         (
             "80-89.99",
             80,
-            90
+            90,
         ),
 
         (
             "70-79.99",
             70,
-            80
+            80,
         ),
 
         (
             "60-69.99",
             60,
-            70
+            70,
         ),
 
         (
             "0-59.99",
             0,
-            60
+            60,
         ),
 
     ]
@@ -618,52 +446,34 @@ if "decision_score" in df.columns:
 
 
         if subset.empty:
+
             continue
 
 
-        metrics = build_metrics(
+        row = metrics(
             subset
         )
 
-        metrics["category"] = "SCORE"
-        metrics["group"] = label
+        row["category"] = (
+            "SCORE"
+        )
 
-        report_rows.append(
-            metrics
+        row["group"] = label
+
+        rows.append(
+            row
         )
 
 
 # ============================================================
-# 4. MARKET REGIME
+# MARKET REGIME
 # ============================================================
 
-print()
-print("=" * 70)
-print("📊 MARKET REGIME PERFORMANCE")
-print("=" * 70)
 
-
-regime_column = None
-
-
-for candidate in [
-    "market_regime",
-    "regime",
-    "market_state",
-]:
-
-    if candidate in df.columns:
-
-        regime_column = candidate
-        break
-
-
-if regime_column:
+if "market_regime" in df.columns:
 
     regimes = (
-        df[
-            regime_column
-        ]
+        df["market_regime"]
         .dropna()
         .astype(str)
         .str.strip()
@@ -675,10 +485,13 @@ if regime_column:
         regimes
     ):
 
+        if not regime:
+
+            continue
+
+
         subset = df[
-            df[
-                regime_column
-            ]
+            df["market_regime"]
             .astype(str)
             .str.strip()
             == regime
@@ -686,203 +499,128 @@ if regime_column:
 
 
         if subset.empty:
+
             continue
 
 
-        metrics = build_metrics(
+        row = metrics(
             subset
         )
 
-        metrics["category"] = (
+        row["category"] = (
             "MARKET_REGIME"
         )
 
-        metrics["group"] = regime
+        row["group"] = regime
 
-        report_rows.append(
-            metrics
+        rows.append(
+            row
         )
 
 
 # ============================================================
-# 5. TICKER PERFORMANCE
+# TICKER
 # ============================================================
-
-print()
-print("=" * 70)
-print("📊 TICKER PERFORMANCE")
-print("=" * 70)
-
-
-ticker_groups = (
-    df["ticker"]
-    .dropna()
-    .astype(str)
-    .str.upper()
-    .str.strip()
-    .unique()
-)
 
 
 for ticker in sorted(
-    ticker_groups
+    df["ticker"]
+    .dropna()
+    .unique()
 ):
 
     subset = df[
         df["ticker"]
-        .astype(str)
-        .str.upper()
-        .str.strip()
         == ticker
     ].copy()
 
 
     if subset.empty:
+
         continue
 
 
-    metrics = build_metrics(
+    row = metrics(
         subset
     )
 
-    metrics["category"] = "TICKER"
-    metrics["group"] = ticker
+    row["category"] = (
+        "TICKER"
+    )
 
-    report_rows.append(
-        metrics
+    row["group"] = ticker
+
+    rows.append(
+        row
     )
 
 
 # ============================================================
-# CREATE REPORT
+# DATAFRAME
 # ============================================================
 
+
 report = pd.DataFrame(
-    report_rows
+    rows
 )
 
 
 # ============================================================
-# ROUND NUMBERS
+# ROUND
 # ============================================================
 
-numeric_report_columns = [
 
-    "d1_hit_rate",
-    "avg_d1_return",
-    "avg_d1_mfe",
-    "avg_d1_mae",
+for column in report.columns:
 
-    "d3_hit_rate",
-    "avg_d3_return",
-    "avg_d3_mfe",
-    "avg_d3_mae",
+    if column in [
+        "d1_hit_rate",
+        "avg_d1_return",
+        "avg_d1_mfe",
+        "avg_d1_mae",
 
-    "d5_hit_rate",
-    "avg_d5_return",
-    "median_d5_return",
+        "d3_hit_rate",
+        "avg_d3_return",
+        "avg_d3_mfe",
+        "avg_d3_mae",
 
-    "avg_d5_mfe",
-    "median_d5_mfe",
+        "d5_hit_rate",
+        "avg_d5_return",
+        "median_d5_return",
 
-    "avg_d5_mae",
-    "median_d5_mae",
+        "avg_d5_mfe",
+        "median_d5_mfe",
 
-    "avg_mfe",
-    "avg_mae",
+        "avg_d5_mae",
+        "median_d5_mae",
 
-]
-
-
-for column in numeric_report_columns:
-
-    if column in report.columns:
+    ]:
 
         report[column] = pd.to_numeric(
             report[column],
-            errors="coerce"
+            errors="coerce",
         ).round(2)
-
-
-# ============================================================
-# COLUMN ORDER
-# ============================================================
-
-preferred_order = [
-
-    "category",
-    "group",
-
-    "signals",
-
-    "d1_completed",
-    "d1_hit_rate",
-    "avg_d1_return",
-    "avg_d1_mfe",
-    "avg_d1_mae",
-
-    "d3_completed",
-    "d3_hit_rate",
-    "avg_d3_return",
-    "avg_d3_mfe",
-    "avg_d3_mae",
-
-    "d5_completed",
-    "d5_hit_rate",
-    "avg_d5_return",
-    "median_d5_return",
-
-    "avg_d5_mfe",
-    "median_d5_mfe",
-
-    "avg_d5_mae",
-    "median_d5_mae",
-
-    "avg_mfe",
-    "avg_mae",
-
-]
-
-
-existing_order = [
-    column
-    for column in preferred_order
-    if column in report.columns
-]
-
-
-remaining_columns = [
-    column
-    for column in report.columns
-    if column not in existing_order
-]
-
-
-report = report[
-    existing_order
-    + remaining_columns
-]
 
 
 # ============================================================
 # SAVE
 # ============================================================
 
+
 report.to_csv(
     OUTPUT_FILE,
-    index=False
+    index=False,
 )
 
 
 # ============================================================
-# CONSOLE SUMMARY
+# CONSOLE OUTPUT
 # ============================================================
+
 
 print()
 print("=" * 70)
-print("🔥 OVERALL SYSTEM PERFORMANCE")
+print("🔥 STEP 15 - ACCURACY REPORT")
 print("=" * 70)
-print()
 
 
 overall_row = report[
@@ -902,7 +640,7 @@ if not overall_row.empty:
 
     row = overall_row.iloc[0]
 
-
+    print()
     print(
         "TOTAL SIGNALS :",
         int(
@@ -910,101 +648,102 @@ if not overall_row.empty:
         )
     )
 
+    print(
+        "D1 COMPLETED  :",
+        int(
+            row["d1_completed"]
+        )
+    )
+
+    print(
+        "D3 COMPLETED  :",
+        int(
+            row["d3_completed"]
+        )
+    )
+
+    print(
+        "D5 COMPLETED  :",
+        int(
+            row["d5_completed"]
+        )
+    )
 
     print()
 
-
     print(
-        "D+1 HIT RATE  :",
+        "D1 HIT RATE   :",
         row["d1_hit_rate"],
         "%"
     )
 
-
     print(
-        "D+3 HIT RATE  :",
+        "D3 HIT RATE   :",
         row["d3_hit_rate"],
         "%"
     )
 
-
     print(
-        "D+5 HIT RATE  :",
+        "D5 HIT RATE   :",
         row["d5_hit_rate"],
         "%"
     )
 
-
     print()
 
-
     print(
-        "AVG D+1 RETURN :",
-        row["avg_d1_return"],
-        "%"
-    )
-
-
-    print(
-        "AVG D+3 RETURN :",
-        row["avg_d3_return"],
-        "%"
-    )
-
-
-    print(
-        "AVG D+5 RETURN :",
+        "D5 AVG RETURN :",
         row["avg_d5_return"],
         "%"
     )
 
-
-    print()
-
-
     print(
-        "AVG MFE        :",
-        row["avg_mfe"],
+        "D5 AVG MFE    :",
+        row["avg_d5_mfe"],
         "%"
     )
 
-
     print(
-        "AVG MAE        :",
-        row["avg_mae"],
+        "D5 AVG MAE    :",
+        row["avg_d5_mae"],
         "%"
     )
 
 
 # ============================================================
-# DECISION SUMMARY
+# DECISION OUTPUT
 # ============================================================
+
 
 print()
 print("=" * 70)
 print("🔥 DECISION PERFORMANCE")
 print("=" * 70)
-print()
 
 
 decision_report = report[
     report["category"]
     == "DECISION"
-].copy()
+]
 
 
 if not decision_report.empty:
 
+    columns = [
+
+        "group",
+        "signals",
+        "d5_completed",
+        "d5_hit_rate",
+        "avg_d5_return",
+        "avg_d5_mfe",
+        "avg_d5_mae",
+
+    ]
+
     print(
         decision_report[
-            [
-                "group",
-                "signals",
-                "d5_hit_rate",
-                "avg_d5_return",
-                "avg_d5_mfe",
-                "avg_d5_mae",
-            ]
+            columns
         ].to_string(
             index=False
         )
@@ -1012,34 +751,39 @@ if not decision_report.empty:
 
 
 # ============================================================
-# SCORE SUMMARY
+# SCORE OUTPUT
 # ============================================================
+
 
 print()
 print("=" * 70)
 print("🔥 SCORE PERFORMANCE")
 print("=" * 70)
-print()
 
 
 score_report = report[
     report["category"]
     == "SCORE"
-].copy()
+]
 
 
 if not score_report.empty:
 
+    columns = [
+
+        "group",
+        "signals",
+        "d5_completed",
+        "d5_hit_rate",
+        "avg_d5_return",
+        "avg_d5_mfe",
+        "avg_d5_mae",
+
+    ]
+
     print(
         score_report[
-            [
-                "group",
-                "signals",
-                "d5_hit_rate",
-                "avg_d5_return",
-                "avg_d5_mfe",
-                "avg_d5_mae",
-            ]
+            columns
         ].to_string(
             index=False
         )
@@ -1047,34 +791,39 @@ if not score_report.empty:
 
 
 # ============================================================
-# MARKET REGIME SUMMARY
+# MARKET OUTPUT
 # ============================================================
+
 
 print()
 print("=" * 70)
 print("🔥 MARKET REGIME PERFORMANCE")
 print("=" * 70)
-print()
 
 
-regime_report = report[
+market_report = report[
     report["category"]
     == "MARKET_REGIME"
-].copy()
+]
 
 
-if not regime_report.empty:
+if not market_report.empty:
+
+    columns = [
+
+        "group",
+        "signals",
+        "d5_completed",
+        "d5_hit_rate",
+        "avg_d5_return",
+        "avg_d5_mfe",
+        "avg_d5_mae",
+
+    ]
 
     print(
-        regime_report[
-            [
-                "group",
-                "signals",
-                "d5_hit_rate",
-                "avg_d5_return",
-                "avg_d5_mfe",
-                "avg_d5_mae",
-            ]
+        market_report[
+            columns
         ].to_string(
             index=False
         )
@@ -1085,22 +834,24 @@ if not regime_report.empty:
 # FINAL
 # ============================================================
 
+
 print()
 print("=" * 70)
 print("STEP 15 OUTPUT")
 print("=" * 70)
 
 print(
-    "OUTPUT FILE :",
+    "OUTPUT :",
     OUTPUT_FILE
 )
 
 print(
-    "REPORT ROWS :",
+    "ROWS   :",
     len(report)
 )
 
 print()
 
-print("STEP 15 OUTPUT : OK")
-```
+print(
+    "STEP 15 OUTPUT : OK"
+)
