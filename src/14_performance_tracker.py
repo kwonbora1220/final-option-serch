@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -31,12 +31,12 @@ INPUT_FILE = os.path.join(
 
 OUTPUT_FILE = os.path.join(
     ANALYSIS_DIR,
-    "performance_history.csv",
+    "performance_history.csv"
 )
 
 
 # ============================================================
-# SETTINGS
+# HORIZONS
 # ============================================================
 
 HORIZONS = {
@@ -47,7 +47,7 @@ HORIZONS = {
 
 
 # ============================================================
-# LOAD
+# LOAD HISTORY
 # ============================================================
 
 history = pd.read_csv(
@@ -62,12 +62,12 @@ if history.empty:
 
 history["signal_date"] = pd.to_datetime(
     history["signal_date"],
-    errors="coerce",
-)
+    errors="coerce"
+).dt.tz_localize(None)
 
 
 # ============================================================
-# DOWNLOAD PRICE HISTORY
+# TICKERS
 # ============================================================
 
 tickers = sorted(
@@ -80,11 +80,22 @@ tickers = sorted(
 )
 
 
+print("==========================================")
+print("STEP 14 - PERFORMANCE TRACKER")
+print("==========================================")
+print()
 print(
     "TRACKING TICKERS :",
     len(tickers)
 )
 
+
+# ============================================================
+# PRICE CACHE
+#
+# We need:
+# Open / High / Low / Close
+# ============================================================
 
 price_cache = {}
 
@@ -105,44 +116,88 @@ for ticker in tickers:
 
             print(
                 "NO DATA :",
-                ticker,
+                ticker
             )
 
             continue
+
+
+        # ------------------------------------------------------
+        # MultiIndex handling
+        # ------------------------------------------------------
 
         if isinstance(
             data.columns,
             pd.MultiIndex
         ):
 
-            close = data[
-                "Close"
-            ].iloc[:, 0]
-
-        else:
-
-            close = data[
-                "Close"
+            data.columns = [
+                col[0]
+                for col in data.columns
             ]
 
-        close.index = (
-            pd.to_datetime(
-                close.index
-            ).tz_localize(
-                None
+
+        required_columns = [
+            "Open",
+            "High",
+            "Low",
+            "Close",
+        ]
+
+
+        missing = [
+            column
+            for column in required_columns
+            if column not in data.columns
+        ]
+
+
+        if missing:
+
+            print(
+                "MISSING OHLC :",
+                ticker,
+                missing
             )
+
+            continue
+
+
+        data = data[
+            required_columns
+        ].copy()
+
+
+        data.index = pd.to_datetime(
+            data.index
         )
 
-        price_cache[
-            ticker
-        ] = close
+
+        # Remove timezone if present
+        try:
+
+            data.index = (
+                data.index
+                .tz_localize(None)
+            )
+
+        except TypeError:
+
+            pass
+
+
+        data = data.sort_index()
+
+
+        price_cache[ticker] = data
+
 
     except Exception as exc:
 
         print(
-            "PRICE ERROR:",
+            "PRICE ERROR :",
             ticker,
-            exc,
+            exc
         )
 
 
@@ -150,66 +205,79 @@ for ticker in tickers:
 # HELPERS
 # ============================================================
 
-def next_trading_price(
-    prices,
+def get_future_bars(
+    data,
     signal_date,
-    trading_days_after,
+    days
 ):
 
-    if prices is None:
-        return np.nan
+    if data is None:
+        return pd.DataFrame()
 
-    future = prices[
-        prices.index >
-        signal_date
+    future = data[
+        data.index > signal_date
     ]
 
-    if len(future) < trading_days_after:
-        return np.nan
+    if len(future) < days:
+        return pd.DataFrame()
 
-    return float(
-        future.iloc[
-            trading_days_after - 1
-        ]
-    )
+    return future.iloc[
+        :days
+    ]
+
+
+def safe_float(value):
+
+    try:
+
+        value = float(value)
+
+        if np.isfinite(value):
+            return value
+
+    except Exception:
+        pass
+
+    return np.nan
 
 
 # ============================================================
-# UPDATE
+# UPDATE EACH SIGNAL
 # ============================================================
 
 for index, row in history.iterrows():
 
-    ticker = str(
-        row["ticker"]
-    ).upper().strip()
+    ticker = (
+        str(row["ticker"])
+        .upper()
+        .strip()
+    )
+
 
     signal_date = row[
         "signal_date"
     ]
+
 
     if pd.isna(
         signal_date
     ):
         continue
 
-    prices = price_cache.get(
+
+    data = price_cache.get(
         ticker
     )
 
-    if prices is None:
+
+    if data is None:
         continue
 
-    signal_price = row[
-        "signal_price"
-    ]
 
-    try:
-        signal_price = float(
-            signal_price
-        )
-    except Exception:
-        signal_price = np.nan
+    signal_price = safe_float(
+        row["signal_price"]
+    )
+
 
     if not np.isfinite(
         signal_price
@@ -223,67 +291,172 @@ for index, row in history.iterrows():
 
     for label, days in HORIZONS.items():
 
-        price = next_trading_price(
-            prices,
+        bars = get_future_bars(
+            data,
             signal_date,
-            days,
+            days
         )
 
-        if not np.isfinite(
-            price
-        ):
+
+        if bars.empty:
             continue
 
-        history.loc[
-            index,
-            f"{label}_price"
-        ] = price
 
-        history.loc[
-            index,
-            f"{label}_return"
-        ] = (
-            price
-            /
-            signal_price
-            - 1.0
-        ) * 100.0
+        # ----------------------------------------------------
+        # END PRICE
+        # ----------------------------------------------------
+
+        end_price = safe_float(
+            bars["Close"].iloc[-1]
+        )
 
 
-    # ========================================================
-    # HIT
-    #
-    # For now:
-    #
-    # Positive return = hit
-    #
-    # This is deliberately simple.
-    # Later we can add target/stop rules.
-    # ========================================================
+        if np.isfinite(
+            end_price
+        ):
 
-    for label in [
-        "d1",
-        "d3",
-        "d5",
-    ]:
+            history.loc[
+                index,
+                f"{label}_price"
+            ] = end_price
+
+
+            history.loc[
+                index,
+                f"{label}_return"
+            ] = (
+                (
+                    end_price
+                    /
+                    signal_price
+                )
+                - 1.0
+            ) * 100.0
+
+
+        # ----------------------------------------------------
+        # MFE
+        #
+        # Maximum favorable excursion
+        #
+        # Highest High after signal
+        # relative to signal price
+        # ----------------------------------------------------
+
+        highest_price = safe_float(
+            bars["High"].max()
+        )
+
+
+        if np.isfinite(
+            highest_price
+        ):
+
+            mfe = (
+                (
+                    highest_price
+                    /
+                    signal_price
+                )
+                - 1.0
+            ) * 100.0
+
+
+            history.loc[
+                index,
+                f"{label}_mfe"
+            ] = mfe
+
+
+        # ----------------------------------------------------
+        # MAE
+        #
+        # Maximum adverse excursion
+        #
+        # Lowest Low after signal
+        # relative to signal price
+        #
+        # Negative number means drawdown.
+        # ----------------------------------------------------
+
+        lowest_price = safe_float(
+            bars["Low"].min()
+        )
+
+
+        if np.isfinite(
+            lowest_price
+        ):
+
+            mae = (
+                (
+                    lowest_price
+                    /
+                    signal_price
+                )
+                - 1.0
+            ) * 100.0
+
+
+            history.loc[
+                index,
+                f"{label}_mae"
+            ] = mae
+
+
+        # ----------------------------------------------------
+        # HIT
+        #
+        # Positive closing return
+        # ----------------------------------------------------
 
         return_value = history.loc[
             index,
             f"{label}_return"
         ]
 
-        if pd.isna(
+
+        if pd.notna(
             return_value
         ):
-            continue
 
-        history.loc[
-            index,
-            f"hit_{label}"
-        ] = (
-            float(return_value)
-            > 0
-        )
+            history.loc[
+                index,
+                f"hit_{label}"
+            ] = (
+                float(return_value) > 0
+            )
+
+
+# ============================================================
+# OVERALL MFE / MAE
+#
+# D5 is our primary evaluation window.
+#
+# If D5 exists, use it.
+# Otherwise keep D1/D3 available.
+# ============================================================
+
+if "d5_mfe" in history.columns:
+
+    history["mfe"] = history[
+        "d5_mfe"
+    ]
+
+else:
+
+    history["mfe"] = np.nan
+
+
+if "d5_mae" in history.columns:
+
+    history["mae"] = history[
+        "d5_mae"
+    ]
+
+else:
+
+    history["mae"] = np.nan
 
 
 # ============================================================
@@ -292,7 +465,7 @@ for index, row in history.iterrows():
 
 history.to_csv(
     OUTPUT_FILE,
-    index=False,
+    index=False
 )
 
 
@@ -300,47 +473,81 @@ history.to_csv(
 # SUMMARY
 # ============================================================
 
-print(
-    "=========================================="
-)
-
-print(
-    "STEP 14 - PERFORMANCE TRACKER"
-)
-
-print(
-    "=========================================="
-)
+print()
+print("==========================================")
+print("PERFORMANCE SUMMARY")
+print("==========================================")
 
 print(
     "HISTORY ROWS :",
-    len(history),
+    len(history)
 )
 
 print(
-    "D1 COMPLETE   :",
-    history["d1_return"].notna().sum(),
+    "D1 COMPLETE  :",
+    history["d1_return"]
+    .notna()
+    .sum()
 )
 
 print(
-    "D3 COMPLETE   :",
-    history["d3_return"].notna().sum(),
+    "D3 COMPLETE  :",
+    history["d3_return"]
+    .notna()
+    .sum()
 )
 
 print(
-    "D5 COMPLETE   :",
-    history["d5_return"].notna().sum(),
+    "D5 COMPLETE  :",
+    history["d5_return"]
+    .notna()
+    .sum()
 )
+
 
 print()
 
+print(
+    "D5 AVG RETURN :",
+    round(
+        pd.to_numeric(
+            history["d5_return"],
+            errors="coerce"
+        ).mean(),
+        2
+    )
+)
+
+
+print(
+    "D5 AVG MFE    :",
+    round(
+        pd.to_numeric(
+            history["d5_mfe"],
+            errors="coerce"
+        ).mean(),
+        2
+    )
+)
+
+
+print(
+    "D5 AVG MAE    :",
+    round(
+        pd.to_numeric(
+            history["d5_mae"],
+            errors="coerce"
+        ).mean(),
+        2
+    )
+)
+
+
+print()
 print(
     "OUTPUT :",
-    OUTPUT_FILE,
+    OUTPUT_FILE
 )
 
 print()
-
-print(
-    "STEP 14 OUTPUT : OK"
-)
+print("STEP 14 OUTPUT : OK")
