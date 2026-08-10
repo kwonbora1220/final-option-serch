@@ -3,13 +3,8 @@ name: STEP 1-12 - Full Option Scanner Pipeline
 on:
   workflow_dispatch:
 
-  # ============================================================
-  # 미국장 종료 후 KST 06:00 자동 실행
-  # UTC 21:00 = KST 06:00
-  # ============================================================
-
-schedule:
-  - cron: "0 21 * * 1-5"
+  schedule:
+    - cron: "0 21 * * 1-5"
 
 permissions:
   contents: write
