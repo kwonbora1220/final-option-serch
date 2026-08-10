@@ -1,0 +1,1418 @@
+name: STEP 1-12 - Full Option Scanner Pipeline
+
+on:
+  workflow_dispatch:
+
+  # ============================================================
+  # TEST COMPLETE AFTER VALIDATION
+  #
+  # 미국장 종료 후 KST 06:00 실행
+  # UTC 21:00 = KST 06:00
+  #
+  # 정상 검증 후 주석 제거
+  # ============================================================
+  #
+  # schedule:
+  #   - cron: "0 21 * * 1-5"
+
+
+permissions:
+  contents: write
+
+
+concurrency:
+  group: option-scanner-step1-12
+  cancel-in-progress: false
+
+
+jobs:
+
+  full-pipeline:
+
+    runs-on: ubuntu-latest
+
+
+    steps:
+
+      # ============================================================
+      # 1. CHECKOUT
+      # ============================================================
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+
+      # ============================================================
+      # 2. PYTHON
+      # ============================================================
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+
+        with:
+          python-version: "3.12"
+
+
+      # ============================================================
+      # 3. DEPENDENCIES
+      # ============================================================
+
+      - name: Install dependencies
+        run: |
+
+          set -e
+
+          python -m pip install --upgrade pip
+
+          pip install -r requirements.txt
+
+
+      # ============================================================
+      # 4. SOURCE CHECK
+      # ============================================================
+
+      - name: STEP 1-12 Source Check
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "STEP 1-12 SOURCE CHECK"
+          echo "=========================================="
+
+          test -f src/01_market_regime.py
+          test -f src/02_collector.py
+          test -f src/03_normalizer.py
+          test -f src/04_greeks.py
+          test -f src/05_unusual_flow.py
+          test -f src/06_top20.py
+          test -f src/07_option_search.py
+          test -f src/08_structure.py
+          test -f src/09_decision.py
+          test -f src/10_final_report.py
+          test -f src/11_special_list.py
+          test -f src/12_telegram.py
+
+          echo ""
+          echo "ALL STEP 1-12 SOURCE FILES : OK"
+
+
+      # ============================================================
+      # 5. CLEAN OLD TEMPORARY INPUTS
+      #
+      # IMPORTANT
+      #
+      # Every run starts with fresh data.
+      # ============================================================
+
+      - name: Clean Previous Run Temporary Files
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "CLEAN PREVIOUS RUN DATA"
+          echo "=========================================="
+
+          rm -f data/raw/options_raw.csv
+          rm -f data/normalized/options_normalized.csv
+
+          rm -f data/analysis/options_greeks.csv
+          rm -f data/analysis/unusual_flow.csv
+
+          rm -f data/analysis/market_regime.csv
+          rm -f data/analysis/market_regime_detail.csv
+
+          echo "OLD TEMPORARY DATA : REMOVED"
+
+
+      # ============================================================
+      # 6. STEP 1 - MARKET REGIME
+      #
+      # NDX
+      # SPY
+      # SOXX
+      # DIA
+      #
+      # NEW DATA EVERY RUN
+      # ============================================================
+
+      - name: Run STEP 1 Market Regime
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "🔥 STEP 1 - MARKET REGIME"
+          echo "=========================================="
+
+          python src/01_market_regime.py
+
+
+      # ============================================================
+      # 7. STEP 1 VALIDATION
+      # ============================================================
+
+      - name: Validate STEP 1 Market Regime
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "STEP 1 OUTPUT CHECK"
+          echo "=========================================="
+
+          test -f data/analysis/market_regime.csv
+
+          python - <<'PY'
+          import pandas as pd
+
+          file = "data/analysis/market_regime.csv"
+
+          df = pd.read_csv(file)
+
+          print("ROWS       :", len(df))
+          print("COLUMNS    :", list(df.columns))
+
+          required = [
+              "ticker",
+              "direction",
+              "market_score",
+              "market_regime",
+          ]
+
+          missing = [
+              c for c in required
+              if c not in df.columns
+          ]
+
+          if missing:
+              raise RuntimeError(
+                  "Missing STEP 1 columns: "
+                  + ", ".join(missing)
+              )
+
+          expected = {
+              "NDX",
+              "SPY",
+              "SOXX",
+              "DIA",
+          }
+
+          actual = set(
+              df["ticker"]
+              .astype(str)
+              .str.upper()
+          )
+
+          missing_tickers = expected - actual
+
+          if missing_tickers:
+              raise RuntimeError(
+                  "Missing market tickers: "
+                  + ", ".join(sorted(missing_tickers))
+              )
+
+          print()
+          print(df.to_string(index=False))
+
+          print()
+          print("STEP 1 RAW OUTPUT : OK")
+          PY
+
+
+      # ============================================================
+      # 8. MARKET REGIME ADAPTER
+      #
+      # IMPORTANT
+      #
+      # 01_market_regime.py currently produces:
+      #
+      # NDX
+      # SPY
+      # SOXX
+      # DIA
+      #
+      # as separate rows.
+      #
+      # STEP 9 / STEP 12 expect:
+      #
+      # one row containing:
+      #
+      # ndx_direction
+      # spy_direction
+      # soxx_direction
+      # dia_direction
+      #
+      # Therefore:
+      #
+      # 1. Preserve original output
+      # 2. Create the format consumed by STEP 9 / 12
+      # ============================================================
+
+      - name: Adapt Market Regime For Decision Engine
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "MARKET REGIME ADAPTER"
+          echo "=========================================="
+
+          python - <<'PY'
+          import pandas as pd
+          from pathlib import Path
+
+          source = Path(
+              "data/analysis/market_regime.csv"
+          )
+
+          detail = Path(
+              "data/analysis/market_regime_detail.csv"
+          )
+
+          df = pd.read_csv(source)
+
+          # Preserve original STEP 1 result
+          df.to_csv(
+              detail,
+              index=False
+          )
+
+          df["ticker"] = (
+              df["ticker"]
+              .astype(str)
+              .str.upper()
+              .str.strip()
+          )
+
+          def get_direction(ticker):
+              rows = df[
+                  df["ticker"] == ticker
+              ]
+
+              if rows.empty:
+                  return "UNAVAILABLE"
+
+              return str(
+                  rows.iloc[-1]["direction"]
+              ).strip().upper()
+
+          # Market score/regime are identical
+          # across the four rows.
+
+          market_score = float(
+              df.iloc[-1]["market_score"]
+          )
+
+          market_regime = str(
+              df.iloc[-1]["market_regime"]
+          ).strip()
+
+          divergence = str(
+              df.iloc[-1].get(
+                  "divergence",
+                  ""
+              )
+          )
+
+          output = pd.DataFrame([
+              {
+                  "ndx_direction":
+                      get_direction("NDX"),
+
+                  "spy_direction":
+                      get_direction("SPY"),
+
+                  "soxx_direction":
+                      get_direction("SOXX"),
+
+                  "dia_direction":
+                      get_direction("DIA"),
+
+                  "market_score":
+                      market_score,
+
+                  "market_regime":
+                      market_regime,
+
+                  "divergence":
+                      divergence,
+
+                  "data_source":
+                      "STEP1_ADAPTED",
+              }
+          ])
+
+          output.to_csv(
+              source,
+              index=False
+          )
+
+          print()
+          print("STEP 1 DETAIL SAVED:")
+          print(detail)
+
+          print()
+          print("STEP 1 DECISION FORMAT:")
+          print(
+              output.to_string(
+                  index=False
+              )
+          )
+
+          print()
+          print("MARKET REGIME ADAPTER : OK")
+          PY
+
+
+      # ============================================================
+      # 9. VERIFY MARKET REGIME DECISION INPUT
+      # ============================================================
+
+      - name: Validate Market Regime Decision Input
+        run: |
+
+          set -e
+
+          python - <<'PY'
+          import pandas as pd
+
+          file = "data/analysis/market_regime.csv"
+
+          df = pd.read_csv(file)
+
+          required = [
+              "ndx_direction",
+              "spy_direction",
+              "soxx_direction",
+              "dia_direction",
+              "market_score",
+              "market_regime",
+          ]
+
+          missing = [
+              c for c in required
+              if c not in df.columns
+          ]
+
+          if missing:
+              raise RuntimeError(
+                  "Decision Market columns missing: "
+                  + ", ".join(missing)
+              )
+
+          if len(df) != 1:
+              raise RuntimeError(
+                  "Decision Market input must contain exactly 1 row"
+              )
+
+          print(
+              df.to_string(index=False)
+          )
+
+          print()
+          print("MARKET → DECISION INPUT : OK")
+          PY
+
+
+      # ============================================================
+      # 10. STEP 2 - OPTION COLLECTOR
+      #
+      # NEW OPTIONS DATA
+      #
+      # 0~180 DTE
+      # ============================================================
+
+      - name: Run STEP 2 Option Collector
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "🔥 STEP 2 - OPTION COLLECTOR"
+          echo "=========================================="
+
+          python src/02_collector.py
+
+
+      # ============================================================
+      # 11. STEP 2 VALIDATION
+      # ============================================================
+
+      - name: Validate STEP 2 Options Raw
+        run: |
+
+          set -e
+
+          test -f data/raw/options_raw.csv
+
+          python - <<'PY'
+          import pandas as pd
+
+          file = "data/raw/options_raw.csv"
+
+          df = pd.read_csv(file)
+
+          print("RAW OPTION ROWS :", len(df))
+          print("COLUMNS         :", len(df.columns))
+
+          if df.empty:
+              raise RuntimeError(
+                  "options_raw.csv is empty"
+              )
+
+          print()
+          print("STEP 2 OUTPUT : OK")
+          PY
+
+
+      # ============================================================
+      # 12. STEP 3 - NORMALIZER
+      # ============================================================
+
+      - name: Run STEP 3 Normalizer
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "🔥 STEP 3 - NORMALIZER"
+          echo "=========================================="
+
+          python src/03_normalizer.py
+
+
+      # ============================================================
+      # 13. STEP 3 VALIDATION
+      # ============================================================
+
+      - name: Validate STEP 3 Normalized
+        run: |
+
+          set -e
+
+          test -f data/normalized/options_normalized.csv
+
+          python - <<'PY'
+          import pandas as pd
+
+          file = (
+              "data/normalized/"
+              "options_normalized.csv"
+          )
+
+          df = pd.read_csv(file)
+
+          print(
+              "NORMALIZED ROWS :",
+              len(df)
+          )
+
+          if df.empty:
+              raise RuntimeError(
+                  "options_normalized.csv is empty"
+              )
+
+          print()
+          print("STEP 3 OUTPUT : OK")
+          PY
+
+
+      # ============================================================
+      # 14. STEP 4 - GREEKS
+      # ============================================================
+
+      - name: Run STEP 4 Greeks
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "🔥 STEP 4 - GREEKS"
+          echo "=========================================="
+
+          python src/04_greeks.py
+
+
+      # ============================================================
+      # 15. STEP 4 VALIDATION
+      # ============================================================
+
+      - name: Validate STEP 4 Greeks
+        run: |
+
+          set -e
+
+          test -f data/analysis/options_greeks.csv
+
+          python - <<'PY'
+          import pandas as pd
+
+          file = (
+              "data/analysis/"
+              "options_greeks.csv"
+          )
+
+          df = pd.read_csv(file)
+
+          print("ROWS       :", len(df))
+          print("COLUMNS    :", len(df.columns))
+
+          if "symbol" in df.columns:
+              print(
+                  "TICKERS    :",
+                  df["symbol"].nunique()
+              )
+
+          if "DTE" in df.columns:
+              print(
+                  "DTE MIN    :",
+                  df["DTE"].min()
+              )
+
+              print(
+                  "DTE MAX    :",
+                  df["DTE"].max()
+              )
+
+          for column in [
+              "delta",
+              "gamma",
+              "vega",
+          ]:
+
+              if column in df.columns:
+                  print(
+                      f"VALID {column.upper():<5}:",
+                      df[column].notna().sum()
+                  )
+
+          if df.empty:
+              raise RuntimeError(
+                  "options_greeks.csv is empty"
+              )
+
+          print()
+          print("STEP 4 OUTPUT : OK")
+          PY
+
+
+      # ============================================================
+      # 16. STEP 5 - UNUSUAL FLOW
+      # ============================================================
+
+      - name: Run STEP 5 Unusual Flow
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "🔥 STEP 5 - UNUSUAL FLOW"
+          echo "=========================================="
+
+          python src/05_unusual_flow.py
+
+
+      # ============================================================
+      # 17. STEP 5 VALIDATION
+      # ============================================================
+
+      - name: Validate STEP 5 Unusual Flow
+        run: |
+
+          set -e
+
+          test -f data/analysis/unusual_flow.csv
+
+          python - <<'PY'
+          import pandas as pd
+
+          file = (
+              "data/analysis/"
+              "unusual_flow.csv"
+          )
+
+          df = pd.read_csv(file)
+
+          print("ROWS    :", len(df))
+          print("COLUMNS :", len(df.columns))
+
+          if "symbol" in df.columns:
+              print(
+                  "TICKERS :",
+                  df["symbol"].nunique()
+              )
+
+          if "flow_score" in df.columns:
+              print(
+                  "FLOW SCORE VALID :",
+                  df["flow_score"].notna().sum()
+              )
+
+          if df.empty:
+              raise RuntimeError(
+                  "unusual_flow.csv is empty"
+              )
+
+          print()
+          print("STEP 5 OUTPUT : OK")
+          PY
+
+
+      # ============================================================
+      # 18. STEP 6 - TOP 20
+      # ============================================================
+
+      - name: Run STEP 6 TOP 20
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "🔥 STEP 6 - TOP 20"
+          echo "=========================================="
+
+          python src/06_top20.py
+
+
+      # ============================================================
+      # 19. STEP 6 VALIDATION
+      # ============================================================
+
+      - name: Validate STEP 6 TOP 20
+        run: |
+
+          set -e
+
+          test -f data/analysis/top20.csv
+
+          python - <<'PY'
+          import pandas as pd
+
+          file = (
+              "data/analysis/"
+              "top20.csv"
+          )
+
+          df = pd.read_csv(file)
+
+          print(
+              "TOP20 ROWS :",
+              len(df)
+          )
+
+          print(
+              "TOP20 TICKERS :",
+              df["symbol"].nunique()
+              if "symbol" in df.columns
+              else "N/A"
+          )
+
+          if len(df) != 20:
+              raise RuntimeError(
+                  f"TOP20 rows invalid: {len(df)}"
+              )
+
+          print()
+          print(
+              df.to_string(
+                  index=False
+              )
+          )
+
+          print()
+          print("STEP 6 OUTPUT : OK")
+          PY
+
+
+      # ============================================================
+      # 20. STEP 7 - OPTION SEARCH
+      # ============================================================
+
+      - name: Run STEP 7 Option Search
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "🔥 STEP 7 - OPTION SEARCH"
+          echo "=========================================="
+
+          test -f data/analysis/top20.csv
+          test -f data/analysis/options_greeks.csv
+
+          python src/07_option_search.py
+
+
+      # ============================================================
+      # 21. STEP 7 VALIDATION
+      # ============================================================
+
+      - name: Validate STEP 7 Option Search
+        run: |
+
+          set -e
+
+          test -f data/analysis/option_search.csv
+
+          python - <<'PY'
+          import pandas as pd
+
+          file = (
+              "data/analysis/"
+              "option_search.csv"
+          )
+
+          df = pd.read_csv(file)
+
+          print(
+              "ROWS :",
+              len(df)
+          )
+
+          if "symbol" in df.columns:
+              print(
+                  "TICKERS :",
+                  df["symbol"].nunique()
+              )
+
+          if df.empty:
+              raise RuntimeError(
+                  "option_search.csv is empty"
+              )
+
+          print()
+          print("STEP 7 OUTPUT : OK")
+          PY
+
+
+      # ============================================================
+      # 22. STEP 8 - STRUCTURE
+      # ============================================================
+
+      - name: Run STEP 8 Structure
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "🔥 STEP 8 - STRUCTURE"
+          echo "=========================================="
+
+          test -f data/analysis/options_greeks.csv
+          test -f data/analysis/top20.csv
+          test -f data/analysis/option_search.csv
+
+          python src/08_structure.py
+
+
+      # ============================================================
+      # 23. STEP 8 VALIDATION
+      # ============================================================
+
+      - name: Validate STEP 8 Structure
+        run: |
+
+          set -e
+
+          test -f data/analysis/structure.csv
+
+          python - <<'PY'
+          import pandas as pd
+
+          file = (
+              "data/analysis/"
+              "structure.csv"
+          )
+
+          df = pd.read_csv(file)
+
+          print(
+              "ROWS :",
+              len(df)
+          )
+
+          if "ticker" in df.columns:
+              print(
+                  "TICKERS :",
+                  df["ticker"].nunique()
+              )
+
+          if df.empty:
+              raise RuntimeError(
+                  "structure.csv is empty"
+              )
+
+          print()
+          print("STEP 8 OUTPUT : OK")
+          PY
+
+
+      # ============================================================
+      # 24. STEP 9 - DECISION
+      #
+      # IMPORTANT:
+      #
+      # NOW STEP 9 receives:
+      #
+      # TODAY'S MARKET
+      # +
+      # TODAY'S FLOW
+      # +
+      # TODAY'S TOP20
+      # +
+      # TODAY'S STRUCTURE
+      #
+      # Therefore final decision can use
+      # today's Market Risk.
+      # ============================================================
+
+      - name: Verify STEP 9 Inputs
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "STEP 9 INPUT CHECK"
+          echo "=========================================="
+
+          test -f data/analysis/market_regime.csv
+          test -f data/analysis/structure.csv
+          test -f data/analysis/unusual_flow.csv
+          test -f data/analysis/top20.csv
+
+          echo "STEP 9 INPUTS : OK"
+
+
+      - name: Run STEP 9 Decision
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "🔥 STEP 9 - DECISION"
+          echo "=========================================="
+
+          python src/09_decision.py
+
+
+      # ============================================================
+      # 25. STEP 9 VALIDATION
+      # ============================================================
+
+      - name: Validate STEP 9 Decision
+        run: |
+
+          set -e
+
+          test -f data/analysis/decision.csv
+
+          python - <<'PY'
+          import pandas as pd
+
+          file = (
+              "data/analysis/"
+              "decision.csv"
+          )
+
+          df = pd.read_csv(file)
+
+          print(
+              "ROWS :",
+              len(df)
+          )
+
+          print(
+              "COLUMNS :",
+              list(df.columns)
+          )
+
+          required = [
+              "ticker",
+              "market_score",
+              "flow_score",
+              "decision_score",
+              "decision",
+          ]
+
+          missing = [
+              c for c in required
+              if c not in df.columns
+          ]
+
+          if missing:
+              raise RuntimeError(
+                  "Missing columns: "
+                  + ", ".join(missing)
+              )
+
+          if df.empty:
+              raise RuntimeError(
+                  "decision.csv is empty"
+              )
+
+          if df["decision_score"].isna().any():
+              raise RuntimeError(
+                  "decision_score contains NaN"
+              )
+
+          if (
+              (df["decision_score"] < 0)
+              |
+              (df["decision_score"] > 100)
+          ).any():
+              raise RuntimeError(
+                  "decision_score outside 0-100"
+              )
+
+          valid_decisions = {
+              "🟢 진입",
+              "🟡 관망",
+              "🔴 회피",
+          }
+
+          invalid = (
+              set(
+                  df["decision"]
+                  .dropna()
+                  .astype(str)
+              )
+              - valid_decisions
+          )
+
+          if invalid:
+              raise RuntimeError(
+                  "Invalid decisions: "
+                  + str(invalid)
+              )
+
+          if df["ticker"].duplicated().any():
+              raise RuntimeError(
+                  "Duplicate ticker detected"
+              )
+
+          print()
+          print("DECISION SUMMARY")
+
+          print(
+              df["decision"]
+              .value_counts(
+                  dropna=False
+              )
+              .to_string()
+          )
+
+          print()
+          print("STEP 9 OUTPUT : OK")
+          PY
+
+
+      # ============================================================
+      # 26. STEP 10 - FINAL REPORT
+      # ============================================================
+
+      - name: Run STEP 10 Final Report
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "🔥 STEP 10 - FINAL REPORT"
+          echo "=========================================="
+
+          test -f data/analysis/decision.csv
+
+          python src/10_final_report.py
+
+
+      # ============================================================
+      # 27. STEP 10 VALIDATION
+      # ============================================================
+
+      - name: Validate STEP 10 Final Report
+        run: |
+
+          set -e
+
+          test -f data/analysis/final_report.csv
+
+          python - <<'PY'
+          import pandas as pd
+
+          file = (
+              "data/analysis/"
+              "final_report.csv"
+          )
+
+          df = pd.read_csv(file)
+
+          print(
+              "ROWS :",
+              len(df)
+          )
+
+          required = [
+              "ticker",
+              "decision_score",
+              "decision",
+          ]
+
+          missing = [
+              c for c in required
+              if c not in df.columns
+          ]
+
+          if missing:
+              raise RuntimeError(
+                  "Missing final report columns: "
+                  + ", ".join(missing)
+              )
+
+          if df.empty:
+              raise RuntimeError(
+                  "final_report.csv is empty"
+              )
+
+          valid_decisions = {
+              "🟢 진입",
+              "🟡 관망",
+              "🔴 회피",
+          }
+
+          invalid = (
+              set(
+                  df["decision"]
+                  .dropna()
+                  .astype(str)
+                  .str.strip()
+              )
+              - valid_decisions
+          )
+
+          if invalid:
+              raise RuntimeError(
+                  "Unexpected decision labels: "
+                  + ", ".join(
+                      sorted(invalid)
+                  )
+              )
+
+          print()
+          print("DECISION SUMMARY")
+
+          print(
+              df["decision"]
+              .value_counts(
+                  dropna=False
+              ).to_string()
+          )
+
+          print()
+          print("STEP 10 OUTPUT : OK")
+          PY
+
+
+      # ============================================================
+      # 28. STEP 11 - SPECIAL LIST
+      # ============================================================
+
+      - name: Run STEP 11 Special List
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "🔥 STEP 11 - SPECIAL LIST"
+          echo "=========================================="
+
+          test -f data/analysis/unusual_flow.csv
+
+          python src/11_special_list.py
+
+
+      # ============================================================
+      # 29. STEP 11 VALIDATION
+      # ============================================================
+
+      - name: Validate STEP 11 Special List
+        run: |
+
+          set -e
+
+          test -f data/analysis/special_list.csv
+          test -f data/analysis/special_list.md
+
+          python - <<'PY'
+          import pandas as pd
+
+          file = (
+              "data/analysis/"
+              "special_list.csv"
+          )
+
+          df = pd.read_csv(file)
+
+          print(
+              "SPECIAL ROWS :",
+              len(df)
+          )
+
+          if "ticker" in df.columns:
+              print(
+                  "TICKERS :",
+                  df["ticker"].nunique()
+              )
+
+          print()
+          print("STEP 11 OUTPUT : OK")
+          PY
+
+
+      # ============================================================
+      # 30. STEP 12 INPUT CHECK
+      #
+      # NOTHING LARGE IS DELETED YET.
+      # ============================================================
+
+      - name: Verify STEP 12 Inputs
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "STEP 12 INPUT CHECK"
+          echo "=========================================="
+
+          for file in \
+            data/analysis/market_regime.csv \
+            data/analysis/market_regime_detail.csv \
+            data/analysis/unusual_flow.csv \
+            data/analysis/top20.csv \
+            data/analysis/option_search.csv \
+            data/analysis/options_greeks.csv \
+            data/analysis/structure.csv \
+            data/analysis/decision.csv \
+            data/analysis/final_report.csv \
+            data/analysis/special_list.csv
+          do
+
+            test -f "$file"
+
+          done
+
+          echo "ALL STEP 12 INPUTS : OK"
+
+
+      # ============================================================
+      # 31. STEP 12 - TELEGRAM
+      # ============================================================
+
+      - name: Run STEP 12 Telegram Reporter
+        env:
+
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "🔥 STEP 12 - TELEGRAM"
+          echo "=========================================="
+
+          python src/12_telegram.py
+
+
+      # ============================================================
+      # 32. TELEGRAM COMPLETE
+      # ============================================================
+
+      - name: STEP 12 Completion Check
+        run: |
+
+          set -e
+
+          echo "STEP 12 TELEGRAM : SCRIPT COMPLETED"
+
+
+      # ============================================================
+      # 33. SAVE SMALL RESULTS
+      #
+      # These are useful historical/result files.
+      #
+      # Large raw analysis files are NOT committed.
+      # ============================================================
+
+      - name: Commit Analysis Results
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "COMMIT ANALYSIS RESULTS"
+          echo "=========================================="
+
+          git config user.name \
+            "github-actions[bot]"
+
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add \
+            data/analysis/market_regime.csv \
+            data/analysis/market_regime_detail.csv \
+            data/analysis/top20.csv \
+            data/analysis/option_search.csv \
+            data/analysis/structure.csv \
+            data/analysis/decision.csv \
+            data/analysis/final_report.csv \
+            data/analysis/special_list.csv \
+            data/analysis/special_list.md
+
+          if git diff --cached --quiet; then
+
+            echo "NO RESULT CHANGES"
+
+          else
+
+            git commit \
+              -m "Update option scanner results [skip ci]"
+
+            echo "RESULTS COMMITTED"
+
+          fi
+
+
+      # ============================================================
+      # 34. SYNC MAIN
+      # ============================================================
+
+      - name: Sync with Remote Main
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "SYNC WITH REMOTE MAIN"
+          echo "=========================================="
+
+          git fetch origin main
+
+          git rebase origin/main
+
+          echo "REBASE : OK"
+
+
+      # ============================================================
+      # 35. PUSH
+      # ============================================================
+
+      - name: Push Results
+        run: |
+
+          set -e
+
+          git push origin HEAD:main
+
+          echo "PUSH : OK"
+
+
+      # ============================================================
+      # 36. FINAL CLEANUP
+      #
+      # ONLY AFTER:
+      #
+      # STEP 12
+      # COMMIT
+      # PUSH
+      #
+      # ============================================================
+
+      - name: Cleanup Temporary Analysis Files
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "FINAL CLEANUP"
+          echo "=========================================="
+
+          rm -f data/raw/options_raw.csv
+
+          rm -f data/normalized/options_normalized.csv
+
+          rm -f data/analysis/options_greeks.csv
+
+          rm -f data/analysis/unusual_flow.csv
+
+          echo "RAW OPTIONS       : REMOVED"
+          echo "NORMALIZED OPTIONS: REMOVED"
+          echo "GREEKS             : REMOVED"
+          echo "UNUSUAL FLOW       : REMOVED"
+
+
+      # ============================================================
+      # 37. FINAL CLEANUP VALIDATION
+      # ============================================================
+
+      - name: Verify Cleanup
+        run: |
+
+          set -e
+
+          for file in \
+            data/raw/options_raw.csv \
+            data/normalized/options_normalized.csv \
+            data/analysis/options_greeks.csv \
+            data/analysis/unusual_flow.csv
+          do
+
+            if [ -f "$file" ]; then
+
+              echo "ERROR: Temporary file still exists:"
+              echo "$file"
+
+              exit 1
+
+            fi
+
+          done
+
+          echo "TEMPORARY FILE CLEANUP : OK"
+
+
+      # ============================================================
+      # 38. COMPLETE
+      # ============================================================
+
+      - name: STEP 1-12 Complete
+        run: |
+
+          echo "=========================================="
+          echo "🔥🔥 STEP 1-12 FULL PIPELINE COMPLETE"
+          echo "=========================================="
+
+          echo ""
+          echo "STEP 1  : Market Regime       NEW"
+          echo "STEP 2  : Option Collector    NEW"
+          echo "STEP 3  : Normalizer          NEW"
+          echo "STEP 4  : Greeks              NEW"
+          echo "STEP 5  : Unusual Flow        NEW"
+          echo "STEP 6  : TOP 20              SAVED"
+          echo "STEP 7  : Option Search       SAVED"
+          echo "STEP 8  : Structure            SAVED"
+          echo "STEP 9  : Decision             SAVED"
+          echo "STEP 10 : Final Report         SAVED"
+          echo "STEP 11 : Special List         SAVED"
+          echo "STEP 12 : Telegram             SENT"
+          echo ""
+          echo "MARKET DATA : NDX / SPY / SOXX / DIA"
+          echo ""
+          echo "FINAL STATUS : SUCCESS"
