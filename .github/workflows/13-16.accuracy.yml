@@ -5,13 +5,30 @@ on:
 
   workflow_dispatch:
 
-  # 미국장 종료 후 KST 08:00
-  # UTC 23:00 = KST 08:00
-  schedule:
-    - cron: "0 23 * * 1-5"
+  # ============================================================
+  # STEP 1-12 완료 후 자동 실행
+  #
+  # STEP 1-12가 오전 06:00 KST에 실행되므로
+  # 1-12가 성공적으로 끝나면 이 workflow가 이어서 실행된다.
+  #
+  # 독립 schedule을 사용하지 않아
+  # 1-12와 동시에 실행되는 문제를 방지한다.
+  # ============================================================
+
+  workflow_run:
+    workflows:
+      - "STEP 1-12 - Full Option Scanner Pipeline"
+
+    types:
+      - completed
+
+    branches:
+      - main
+
 
 permissions:
   contents: write
+
 
 concurrency:
   group: option-scanner-accuracy
@@ -22,7 +39,23 @@ jobs:
 
   accuracy-validation:
 
+    # ============================================================
+    # workflow_run은 1-12가 실패했을 때도 호출될 수 있다.
+    #
+    # 반드시 1-12가 SUCCESS인 경우에만 실행한다.
+    # ============================================================
+
+    if: >
+      github.event_name == 'workflow_dispatch'
+      ||
+      (
+        github.event_name == 'workflow_run'
+        &&
+        github.event.workflow_run.conclusion == 'success'
+      )
+
     runs-on: ubuntu-latest
+
 
     steps:
 
@@ -65,14 +98,6 @@ jobs:
 
       # ============================================================
       # 4. SOURCE CHECK
-      #
-      # IMPORTANT
-      #
-      # STEP 16은 이제
-      #
-      # 16_confidence_report.py ❌ 사용하지 않음
-      #
-      # 16_reliability_report.py ✅ 사용
       # ============================================================
 
       - name: Check Accuracy Source Files
@@ -105,8 +130,6 @@ jobs:
           echo "STEP 14 SOURCE : OK"
           echo "STEP 15 SOURCE : OK"
           echo "STEP 16 SOURCE : OK"
-          echo ""
-          echo "16_confidence_report.py : NOT USED"
           echo ""
           echo "ALL REQUIRED SOURCE FILES : OK"
 
@@ -142,9 +165,6 @@ jobs:
 
       # ============================================================
       # 6. STEP 13
-      #
-      # 기존 FINAL REPORT의 신호를
-      # 미래 성과 검증용으로 누적
       # ============================================================
 
       - name: Run STEP 13 Prediction Archive
@@ -184,15 +204,14 @@ jobs:
 
           df = pd.read_csv(file)
 
-          print(
-              "ROWS   :",
-              len(df)
-          )
+          print("ROWS   :", len(df))
 
-          print(
-              "TICKERS:",
-              df["ticker"].nunique()
-          )
+          if "ticker" in df.columns:
+
+              print(
+                  "TICKERS:",
+                  df["ticker"].nunique()
+              )
 
           if "signal_price" in df.columns:
 
@@ -222,15 +241,11 @@ jobs:
       # ============================================================
       # 8. STEP 14
       #
-      # 실제 시장가격을 이용해서
-      #
       # D1
       # D3
       # D5
       # MFE
       # MAE
-      #
-      # 를 계산
       # ============================================================
 
       - name: Run STEP 14 Performance Tracker
@@ -320,9 +335,6 @@ jobs:
 
       # ============================================================
       # 10. STEP 15
-      #
-      # 누적된 실제 결과를 이용해서
-      # 정확도 통계 생성
       # ============================================================
 
       - name: Run STEP 15 Accuracy Report
@@ -390,27 +402,11 @@ jobs:
       # ============================================================
       # 12. STEP 16
       #
-      # ★ IMPORTANT
+      # 실제 사용하는 파일:
       #
-      # 기존:
+      # src/16_reliability_report.py
       #
-      # 16_confidence_report.py
-      #
-      # 대신:
-      #
-      # 16_reliability_report.py
-      #
-      # 를 실행한다.
-      #
-      # 이 파일은:
-      #
-      # performance_history.csv
-      # +
-      # accuracy_report.csv
-      #
-      # 를 이용해서
-      #
-      # 실제 누적 검증 상태를 계산한다.
+      # 16_confidence_report.py는 사용하지 않는다.
       # ============================================================
 
       - name: Run STEP 16 Reliability Report
@@ -436,11 +432,6 @@ jobs:
 
       # ============================================================
       # 13. STEP 16 VALIDATION
-      #
-      # ★ reliability_report.csv
-      # ★ reliability_report.md
-      #
-      # 두 결과 모두 확인
       # ============================================================
 
       - name: Validate STEP 16 Reliability
@@ -477,7 +468,6 @@ jobs:
           print("==========================================")
 
           print()
-
           print(
               "ROWS :",
               len(df)
@@ -504,18 +494,11 @@ jobs:
               )
 
           print()
-          print(
-              "RELIABILITY CSV : OK"
-          )
-
-          print(
-              "RELIABILITY MD  : OK"
-          )
+          print("RELIABILITY CSV : OK")
+          print("RELIABILITY MD  : OK")
 
           print()
-          print(
-              "STEP 16 OUTPUT : OK"
-          )
+          print("STEP 16 OUTPUT : OK")
 
           PY
 
@@ -523,8 +506,7 @@ jobs:
       # ============================================================
       # 14. DISPLAY RELIABILITY SUMMARY
       #
-      # ★ 여기서 실제로 신뢰성이 얼마나 쌓였는지
-      # GitHub Actions 로그에서 확인 가능
+      # GitHub Actions에서도 확인 가능
       # ============================================================
 
       - name: Display Reliability Summary
@@ -587,10 +569,6 @@ jobs:
                   )
 
 
-          # --------------------------------------------------------
-          # RELIABILITY REPORT
-          # --------------------------------------------------------
-
           reliability = pd.read_csv(
               "data/analysis/reliability_report.csv"
           )
@@ -608,10 +586,6 @@ jobs:
               )
           )
 
-
-          # --------------------------------------------------------
-          # LOOK FOR IMPORTANT METRICS
-          # --------------------------------------------------------
 
           print()
           print("==========================================")
@@ -636,15 +610,25 @@ jobs:
           ):
 
               important = [
+
                   "total_signals",
+
                   "d5_completed",
+
                   "d5_hit_rate",
+
                   "d5_avg_return",
+
                   "d5_avg_mfe",
+
                   "d5_avg_mae",
+
                   "recent_50_count",
+
                   "recent_50_hit_rate",
+
                   "recent_50_avg_return",
+
               ]
 
               for metric in important:
@@ -672,18 +656,253 @@ jobs:
 
 
       # ============================================================
-      # 15. COMMIT ACCURACY / RELIABILITY DATA
+      # 15. TELEGRAM RELIABILITY REPORT
       #
-      # 중요:
+      # ★ 추가된 핵심 기능
       #
-      # prediction_history
-      # performance_history
-      # accuracy_report
-      # reliability_report
+      # STEP 16 결과를 매일 Telegram으로 전송
       #
-      # 모두 GitHub에 저장
+      # TELEGRAM_BOT_TOKEN
+      # TELEGRAM_CHAT_ID
       #
-      # 다음 실행에서 다시 읽어서 누적 검증
+      # 기존 STEP 12와 동일한 Secrets 사용
+      # ============================================================
+
+      - name: Send Reliability Report to Telegram
+        env:
+
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "📨 SEND RELIABILITY REPORT TO TELEGRAM"
+          echo "=========================================="
+
+
+          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+
+            echo "ERROR: TELEGRAM_BOT_TOKEN is missing"
+
+            exit 1
+
+          fi
+
+
+          if [ -z "$TELEGRAM_CHAT_ID" ]; then
+
+            echo "ERROR: TELEGRAM_CHAT_ID is missing"
+
+            exit 1
+
+          fi
+
+
+          python - <<'PY'
+
+          import os
+          import pandas as pd
+          import requests
+
+
+          token = os.environ[
+              "TELEGRAM_BOT_TOKEN"
+          ]
+
+          chat_id = os.environ[
+              "TELEGRAM_CHAT_ID"
+          ]
+
+
+          file = (
+              "data/analysis/"
+              "reliability_report.csv"
+          )
+
+
+          df = pd.read_csv(file)
+
+
+          metrics = {}
+
+          if (
+              "metric" in df.columns
+              and "value" in df.columns
+          ):
+
+              for _, row in df.iterrows():
+
+                  metrics[
+                      str(row["metric"])
+                  ] = row["value"]
+
+
+          def get_metric(name, default="N/A"):
+
+              return metrics.get(
+                  name,
+                  default
+              )
+
+
+          total_signals = get_metric(
+              "total_signals"
+          )
+
+          d5_completed = get_metric(
+              "d5_completed"
+          )
+
+          d5_hit_rate = get_metric(
+              "d5_hit_rate"
+          )
+
+          d5_avg_return = get_metric(
+              "d5_avg_return"
+          )
+
+          d5_avg_mfe = get_metric(
+              "d5_avg_mfe"
+          )
+
+          d5_avg_mae = get_metric(
+              "d5_avg_mae"
+          )
+
+          recent_count = get_metric(
+              "recent_50_count"
+          )
+
+          recent_hit = get_metric(
+              "recent_50_hit_rate"
+          )
+
+          recent_return = get_metric(
+              "recent_50_avg_return"
+          )
+
+
+          # --------------------------------------------------------
+          # reliability_report.py가 생성한 전체 결과에서
+          # reliability score / status가 있을 경우 표시
+          # --------------------------------------------------------
+
+          reliability_score = get_metric(
+              "reliability_score"
+          )
+
+          reliability_status = get_metric(
+              "reliability_status"
+          )
+
+          sample_status = get_metric(
+              "sample_status"
+          )
+
+
+          def fmt(value):
+
+              if value == "N/A":
+
+                  return value
+
+              try:
+
+                  number = float(value)
+
+                  if number.is_integer():
+
+                      return str(
+                          int(number)
+                      )
+
+                  return f"{number:.2f}"
+
+              except Exception:
+
+                  return str(value)
+
+
+          message = f"""
+━━━━━━━━━━━━━━━━━━━━━━
+📊 OPTION SCANNER
+🔥 RELIABILITY REPORT
+━━━━━━━━━━━━━━━━━━━━━━
+
+📈 누적 검증
+• 전체 신호       : {fmt(total_signals)}
+• D5 완료         : {fmt(d5_completed)}
+
+🎯 D5 성과
+• 적중률          : {fmt(d5_hit_rate)}%
+• 평균 수익률     : {fmt(d5_avg_return)}%
+
+📊 MFE / MAE
+• 평균 MFE        : {fmt(d5_avg_mfe)}%
+• 평균 MAE        : {fmt(d5_avg_mae)}%
+
+🔥 최근 50개
+• 표본            : {fmt(recent_count)}
+• 적중률          : {fmt(recent_hit)}%
+• 평균 수익률     : {fmt(recent_return)}%
+
+🧪 검증 상태
+• 표본 상태       : {fmt(sample_status)}
+• Reliability     : {fmt(reliability_score)}
+• 상태            : {fmt(reliability_status)}
+
+━━━━━━━━━━━━━━━━━━━━━━
+🔥 RELIABILITY DATA
+계속 누적 중
+━━━━━━━━━━━━━━━━━━━━━━
+""".strip()
+
+
+          url = (
+              f"https://api.telegram.org/"
+              f"bot{token}/sendMessage"
+          )
+
+
+          response = requests.post(
+
+              url,
+
+              data={
+                  "chat_id": chat_id,
+                  "text": message,
+              },
+
+              timeout=30,
+          )
+
+
+          if not response.ok:
+
+              print(
+                  "Telegram response:",
+                  response.text
+              )
+
+              raise RuntimeError(
+                  "Telegram message failed"
+              )
+
+
+          print()
+          print(
+              "TELEGRAM RELIABILITY REPORT : SENT"
+          )
+
+          PY
+
+
+      # ============================================================
+      # 16. COMMIT ACCURACY / RELIABILITY DATA
       # ============================================================
 
       - name: Commit Accuracy and Reliability Data
@@ -725,9 +944,9 @@ jobs:
 
 
       # ============================================================
-      # 16. SYNC MAIN
+      # 17. SYNC MAIN
       #
-      # 다른 workflow가 main에 결과를 기록했을 경우
+      # 다른 결과 commit이 이미 main에 들어온 경우
       # push 충돌 방지
       # ============================================================
 
@@ -742,32 +961,22 @@ jobs:
 
           git fetch origin main
 
-          if git diff --quiet HEAD origin/main; then
+          git rebase origin/main
 
-            echo "LOCAL MAIN IS UP TO DATE"
-
-          else
-
-            echo "REMOTE MAIN HAS NEW COMMITS"
-
-            git rebase origin/main
-
-          fi
-
-          echo "SYNC : OK"
+          echo "REBASE : OK"
 
 
       # ============================================================
-      # 17. PUSH
+      # 18. PUSH
       # ============================================================
 
-      - name: Push Accuracy and Reliability Data
+      - name: Push Accuracy Results
         run: |
 
           set -e
 
           echo "=========================================="
-          echo "PUSH ACCURACY / RELIABILITY DATA"
+          echo "PUSH ACCURACY RESULTS"
           echo "=========================================="
 
           git push origin HEAD:main
@@ -776,13 +985,12 @@ jobs:
 
 
       # ============================================================
-      # 18. COMPLETE
+      # 19. COMPLETE
       # ============================================================
 
-      - name: Accuracy Pipeline Complete
+      - name: STEP 13-16 Complete
         run: |
 
-          echo ""
           echo "=========================================="
           echo "🔥🔥 STEP 13-16 COMPLETE"
           echo "=========================================="
@@ -794,6 +1002,7 @@ jobs:
           echo "STEP 16 : Reliability Report"
 
           echo ""
+
           echo "prediction_history.csv  : SAVED"
           echo "performance_history.csv : SAVED"
           echo "accuracy_report.csv     : SAVED"
@@ -801,9 +1010,12 @@ jobs:
           echo "reliability_report.md   : SAVED"
 
           echo ""
-          echo "16_confidence_report.py : NOT USED"
+
+          echo "TELEGRAM RELIABILITY    : SENT"
 
           echo ""
+
           echo "=========================================="
           echo "🔥 RELIABILITY DATA : ACCUMULATING"
           echo "=========================================="
+
