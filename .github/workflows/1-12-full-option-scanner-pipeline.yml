@@ -1,4 +1,3 @@
-```yaml
 name: STEP 1-12 - Full Option Scanner Pipeline
 
 on:
@@ -1499,4 +1498,3 @@ jobs:
 
           echo ""
           echo "FINAL STATUS : SUCCESS"
-```
