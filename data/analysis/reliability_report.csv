@@ -1,0 +1,17 @@
+metric,value
+total_signals,25
+d5_completed,0
+d5_hit_rate,
+d5_avg_return,
+d5_avg_mfe,
+d5_avg_mae,
+recent_50_count,0
+recent_50_hit_rate,
+recent_50_avg_return,
+entry_hit_rate,
+watch_hit_rate,
+avoid_success_rate,
+score_monotonic,False
+sample_status,🔴 표본 부족
+reliability_score,0.0
+reliability_status,🔴 데이터 부족
