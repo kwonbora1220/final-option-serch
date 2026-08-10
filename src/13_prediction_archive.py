@@ -7,8 +7,30 @@ import pandas as pd
 
 
 # ============================================================
-# PATH
+# STEP 13 - PREDICTION ARCHIVE
 # ============================================================
+#
+# 목적:
+#
+# STEP 9 decision.csv
+# STEP 8 structure.csv
+# STEP 1 market_regime.csv
+# STEP 6 top20.csv
+#
+# 를 하나의 "오늘의 신호"로 보관한다.
+#
+# 이후 STEP 14가 이 데이터를 사용해서
+#
+# D+1
+# D+3
+# D+5
+# MFE
+# MAE
+#
+# 를 계산한다.
+#
+# ============================================================
+
 
 BASE_DIR = os.path.dirname(
     os.path.dirname(
@@ -22,9 +44,15 @@ ANALYSIS_DIR = os.path.join(
     "analysis",
 )
 
+
 DECISION_FILE = os.path.join(
     ANALYSIS_DIR,
     "decision.csv",
+)
+
+STRUCTURE_FILE = os.path.join(
+    ANALYSIS_DIR,
+    "structure.csv",
 )
 
 MARKET_FILE = os.path.join(
@@ -47,11 +75,15 @@ OUTPUT_FILE = os.path.join(
 # HELPERS
 # ============================================================
 
+
 def find_col(df, names):
 
     normalized = {
-        str(c).strip().lower(): c
-        for c in df.columns
+        str(column)
+        .strip()
+        .lower()
+        .replace(" ", "_"): column
+        for column in df.columns
     }
 
     for name in names:
@@ -60,60 +92,73 @@ def find_col(df, names):
             str(name)
             .strip()
             .lower()
+            .replace(" ", "_")
         )
 
         if key in normalized:
+
             return normalized[key]
 
     return None
 
 
-def numeric_series(df, names):
+def numeric(value):
 
-    col = find_col(
-        df,
-        names,
-    )
+    try:
 
-    if col is None:
-        return pd.Series(
-            [float("nan")] * len(df),
-            index=df.index,
-        )
+        value = float(value)
 
-    return pd.to_numeric(
-        df[col],
-        errors="coerce",
-    )
+        if pd.notna(value):
+
+            return value
+
+    except Exception:
+
+        pass
+
+    return float("nan")
 
 
-def text_series(df, names):
-
-    col = find_col(
-        df,
-        names,
-    )
-
-    if col is None:
-        return pd.Series(
-            [""] * len(df),
-            index=df.index,
-        )
+def normalize_ticker(series):
 
     return (
-        df[col]
-        .fillna("")
+        series
         .astype(str)
+        .str.upper()
         .str.strip()
     )
+
+
+# ============================================================
+# FILE CHECK
+# ============================================================
+
+
+for file in [
+    DECISION_FILE,
+    STRUCTURE_FILE,
+    MARKET_FILE,
+    TOP20_FILE,
+]:
+
+    if not os.path.exists(file):
+
+        raise RuntimeError(
+            f"Required file not found: {file}"
+        )
 
 
 # ============================================================
 # LOAD
 # ============================================================
 
+
 decision = pd.read_csv(
     DECISION_FILE
+)
+
+structure = pd.read_csv(
+    STRUCTURE_FILE
 )
 
 market = pd.read_csv(
@@ -126,110 +171,25 @@ top20 = pd.read_csv(
 
 
 if decision.empty:
+
     raise RuntimeError(
         "decision.csv is empty"
     )
 
 
-# ============================================================
-# CURRENT SIGNAL DATE
-# ============================================================
+if structure.empty:
 
-signal_timestamp = datetime.now(
-    timezone.utc
-).isoformat()
-
-signal_date = datetime.now(
-    timezone.utc
-).strftime(
-    "%Y-%m-%d"
-)
-
-
-# ============================================================
-# MARKET
-# ============================================================
-
-market_row = market.iloc[-1]
-
-market_score_col = find_col(
-    market,
-    [
-        "market_score",
-        "market_regime_score",
-        "score",
-    ],
-)
-
-market_regime_col = find_col(
-    market,
-    [
-        "market_regime",
-        "regime",
-    ],
-)
-
-market_score = (
-    pd.to_numeric(
-        market_row[market_score_col],
-        errors="coerce",
-    )
-    if market_score_col
-    else float("nan")
-)
-
-market_regime = (
-    str(
-        market_row[
-            market_regime_col
-        ]
-    ).strip()
-    if market_regime_col
-    else ""
-)
-
-
-# ============================================================
-# MARKET DIRECTIONS
-# ============================================================
-
-def market_value(name):
-
-    col = find_col(
-        market,
-        [name],
+    raise RuntimeError(
+        "structure.csv is empty"
     )
 
-    if col is None:
-        return ""
-
-    return str(
-        market_row[col]
-    ).strip()
-
-
-ndx_direction = market_value(
-    "ndx_direction"
-)
-
-spy_direction = market_value(
-    "spy_direction"
-)
-
-soxx_direction = market_value(
-    "soxx_direction"
-)
-
-dia_direction = market_value(
-    "dia_direction"
-)
-
 
 # ============================================================
-# DECISION NORMALIZATION
+# TICKER COLUMNS
 # ============================================================
 
-ticker_col = find_col(
+
+decision_ticker_col = find_col(
     decision,
     [
         "ticker",
@@ -237,109 +197,64 @@ ticker_col = find_col(
     ],
 )
 
-if ticker_col is None:
+structure_ticker_col = find_col(
+    structure,
+    [
+        "ticker",
+        "symbol",
+    ],
+)
+
+top20_ticker_col = find_col(
+    top20,
+    [
+        "ticker",
+        "symbol",
+    ],
+)
+
+
+if decision_ticker_col is None:
+
     raise RuntimeError(
         "decision.csv ticker column missing"
     )
 
 
-result = pd.DataFrame()
+if structure_ticker_col is None:
 
-result["signal_date"] = [
-    signal_date
-] * len(decision)
-
-result["signal_timestamp"] = [
-    signal_timestamp
-] * len(decision)
-
-result["ticker"] = (
-    decision[ticker_col]
-    .astype(str)
-    .str.upper()
-    .str.strip()
-)
-
-
-# ============================================================
-# DECISION DATA
-# ============================================================
-
-for output_name, source_names in [
-
-    (
-        "decision_score",
-        [
-            "decision_score",
-            "score",
-        ],
-    ),
-
-    (
-        "market_score",
-        [
-            "market_score",
-        ],
-    ),
-
-    (
-        "flow_score",
-        [
-            "flow_score",
-        ],
-    ),
-
-    (
-        "structure_score",
-        [
-            "structure_score",
-        ],
-    ),
-
-    (
-        "option_score",
-        [
-            "option_score",
-        ],
-    ),
-
-]:
-
-    result[output_name] = numeric_series(
-        decision,
-        source_names,
+    raise RuntimeError(
+        "structure.csv ticker column missing"
     )
 
 
-decision_col = find_col(
-    decision,
-    [
-        "decision",
-    ],
+# ============================================================
+# NORMALIZE TICKERS
+# ============================================================
+
+
+decision["ticker"] = normalize_ticker(
+    decision[decision_ticker_col]
 )
 
-if decision_col:
+structure["ticker"] = normalize_ticker(
+    structure[structure_ticker_col]
+)
 
-    result["decision"] = (
-        decision[decision_col]
-        .fillna("")
-        .astype(str)
-        .str.strip()
+if top20_ticker_col:
+
+    top20["ticker"] = normalize_ticker(
+        top20[top20_ticker_col]
     )
 
-else:
-
-    result["decision"] = ""
-
 
 # ============================================================
-# PRICE
-#
-# We try several possible names.
+# STRUCTURE PRICE
 # ============================================================
 
-result["signal_price"] = numeric_series(
-    decision,
+
+price_col = find_col(
+    structure,
     [
         "current_price",
         "price",
@@ -349,101 +264,421 @@ result["signal_price"] = numeric_series(
 )
 
 
+if price_col is None:
+
+    raise RuntimeError(
+        "No current price column found "
+        "in structure.csv"
+    )
+
+
+structure["signal_price"] = pd.to_numeric(
+    structure[price_col],
+    errors="coerce",
+)
+
+
+# ============================================================
+# STRUCTURE FIELDS
+# ============================================================
+
+
+structure_fields = [
+
+    "current_price",
+
+    "call_wall",
+    "put_wall",
+
+    "support",
+    "resistance",
+
+    "call_gex",
+    "put_gex",
+    "net_gex",
+
+    "structure",
+    "price_location",
+    "gex_structure",
+    "wall_structure",
+
+]
+
+
+available_structure_fields = [
+
+    column
+    for column in structure_fields
+    if column in structure.columns
+
+]
+
+
+structure_small = structure[
+    [
+        "ticker",
+        "signal_price",
+        *available_structure_fields,
+    ]
+].copy()
+
+
+structure_small = (
+    structure_small
+    .drop_duplicates(
+        "ticker",
+        keep="last",
+    )
+)
+
+
+# ============================================================
+# MERGE DECISION + STRUCTURE
+# ============================================================
+
+
+result = decision.merge(
+    structure_small,
+    on="ticker",
+    how="left",
+    suffixes=("", "_structure"),
+)
+
+
+# ============================================================
+# VERIFY PRICE
+# ============================================================
+
+
+missing_price = result[
+    "signal_price"
+].isna()
+
+
+if missing_price.any():
+
+    missing_tickers = (
+        result.loc[
+            missing_price,
+            "ticker"
+        ]
+        .astype(str)
+        .tolist()
+    )
+
+    raise RuntimeError(
+        "Signal price missing for: "
+        + ", ".join(
+            missing_tickers
+        )
+    )
+
+
 # ============================================================
 # MARKET SNAPSHOT
 # ============================================================
 
-result["market_regime"] = market_regime
 
-result["ndx_direction"] = ndx_direction
+if market.empty:
 
-result["spy_direction"] = spy_direction
+    raise RuntimeError(
+        "market_regime.csv is empty"
+    )
 
-result["soxx_direction"] = soxx_direction
 
-result["dia_direction"] = dia_direction
+market_row = market.iloc[-1]
+
+
+def market_value(names):
+
+    column = find_col(
+        market,
+        names,
+    )
+
+    if column is None:
+
+        return ""
+
+    value = market_row[column]
+
+    if pd.isna(value):
+
+        return ""
+
+    return str(value).strip()
+
+
+market_score = numeric(
+    market_value(
+        [
+            "market_score",
+            "market_regime_score",
+            "score",
+        ]
+    )
+)
+
+
+market_regime = market_value(
+    [
+        "market_regime",
+        "regime",
+    ]
+)
+
+
+ndx_direction = market_value(
+    [
+        "ndx_direction",
+    ]
+)
+
+
+spy_direction = market_value(
+    [
+        "spy_direction",
+    ]
+)
+
+
+soxx_direction = market_value(
+    [
+        "soxx_direction",
+    ]
+)
+
+
+dia_direction = market_value(
+    [
+        "dia_direction",
+    ]
+)
+
+
+# ============================================================
+# DATE
+# ============================================================
+
+
+now = datetime.now(
+    timezone.utc
+)
+
+signal_date = now.strftime(
+    "%Y-%m-%d"
+)
+
+signal_timestamp = now.isoformat()
+
+
+# ============================================================
+# CREATE ARCHIVE
+# ============================================================
+
+
+archive = pd.DataFrame()
+
+archive["signal_date"] = [
+    signal_date
+] * len(result)
+
+archive["signal_timestamp"] = [
+    signal_timestamp
+] * len(result)
+
+
+# ============================================================
+# BASIC
+# ============================================================
+
+
+archive["ticker"] = result[
+    "ticker"
+]
+
+
+# ============================================================
+# DECISION DATA
+# ============================================================
+
+
+for column in [
+
+    "decision_score",
+    "market_score",
+    "flow_score",
+    "direction_score",
+    "structure_score",
+    "price_score",
+    "index_score",
+
+]:
+
+    if column in result.columns:
+
+        archive[column] = pd.to_numeric(
+            result[column],
+            errors="coerce",
+        )
+
+    else:
+
+        archive[column] = float("nan")
+
+
+decision_col = find_col(
+    result,
+    [
+        "decision",
+        "final_decision",
+    ],
+)
+
+
+if decision_col:
+
+    archive["decision"] = (
+        result[decision_col]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+    )
+
+else:
+
+    archive["decision"] = ""
+
+
+# ============================================================
+# SIGNAL PRICE
+# ============================================================
+
+
+archive["signal_price"] = pd.to_numeric(
+    result["signal_price"],
+    errors="coerce",
+)
+
+
+# ============================================================
+# MARKET
+# ============================================================
+
+
+archive["market_regime"] = market_regime
+
+archive["market_score_snapshot"] = (
+    market_score
+)
+
+archive["ndx_direction"] = (
+    ndx_direction
+)
+
+archive["spy_direction"] = (
+    spy_direction
+)
+
+archive["soxx_direction"] = (
+    soxx_direction
+)
+
+archive["dia_direction"] = (
+    dia_direction
+)
 
 
 # ============================================================
 # TOP20 RANK
 # ============================================================
 
-top_ticker_col = find_col(
-    top20,
-    [
-        "ticker",
-        "symbol",
-    ],
-)
 
-rank_col = find_col(
-    top20,
-    [
-        "rank",
-    ],
-)
+archive["top20_rank"] = float("nan")
+
 
 if (
-    top_ticker_col
-    and rank_col
+    top20_ticker_col
+    and "rank" in top20.columns
 ):
 
     rank_map = dict(
         zip(
-            top20[
-                top_ticker_col
-            ]
-            .astype(str)
-            .str.upper()
-            .str.strip(),
-
+            top20["ticker"],
             pd.to_numeric(
-                top20[rank_col],
+                top20["rank"],
                 errors="coerce",
             ),
         )
     )
 
-    result["top20_rank"] = (
-        result["ticker"]
+    archive["top20_rank"] = (
+        archive["ticker"]
         .map(rank_map)
     )
 
-else:
 
-    result["top20_rank"] = float("nan")
+# ============================================================
+# STRUCTURE SNAPSHOT
+# ============================================================
+
+
+for column in available_structure_fields:
+
+    output_column = (
+        f"structure_{column}"
+    )
+
+    if output_column in result.columns:
+
+        archive[output_column] = (
+            result[output_column]
+        )
+
+    elif column in result.columns:
+
+        archive[output_column] = (
+            result[column]
+        )
 
 
 # ============================================================
-# INITIAL PERFORMANCE COLUMNS
+# FUTURE PERFORMANCE COLUMNS
 # ============================================================
+
 
 for column in [
 
     "d1_price",
     "d1_return",
+    "d1_mfe",
+    "d1_mae",
+    "hit_d1",
 
     "d3_price",
     "d3_return",
+    "d3_mfe",
+    "d3_mae",
+    "hit_d3",
 
     "d5_price",
     "d5_return",
+    "d5_mfe",
+    "d5_mae",
+    "hit_d5",
 
     "mfe",
     "mae",
 
-    "hit_d1",
-    "hit_d3",
-    "hit_d5",
-
 ]:
 
-    result[column] = pd.NA
+    archive[column] = pd.NA
 
 
 # ============================================================
-# APPEND HISTORY
+# APPEND EXISTING HISTORY
 # ============================================================
+
 
 if os.path.exists(
     OUTPUT_FILE
@@ -456,19 +691,24 @@ if os.path.exists(
     history = pd.concat(
         [
             old,
-            result,
+            archive,
         ],
         ignore_index=True,
+        sort=False,
     )
 
 else:
 
-    history = result
+    history = archive
 
 
 # ============================================================
 # DUPLICATE PROTECTION
+#
+# 같은 날짜 + 같은 종목은
+# 한 번만 저장한다.
 # ============================================================
+
 
 history = (
     history
@@ -479,12 +719,16 @@ history = (
         ],
         keep="last",
     )
+    .reset_index(
+        drop=True
+    )
 )
 
 
 # ============================================================
 # SAVE
 # ============================================================
+
 
 history.to_csv(
     OUTPUT_FILE,
@@ -493,55 +737,57 @@ history.to_csv(
 
 
 # ============================================================
-# SUMMARY
+# OUTPUT
 # ============================================================
 
-print(
-    "=========================================="
-)
 
-print(
-    "STEP 13 - PREDICTION ARCHIVE"
-)
-
-print(
-    "=========================================="
-)
+print()
+print("=" * 70)
+print("🔥 STEP 13 - PREDICTION ARCHIVE")
+print("=" * 70)
 
 print(
     "TODAY SIGNALS :",
-    len(result),
+    len(archive)
 )
 
 print(
-    "TOTAL HISTORY  :",
-    len(history),
+    "TOTAL HISTORY :",
+    len(history)
 )
 
 print(
-    "OUTPUT         :",
-    OUTPUT_FILE,
+    "SIGNAL DATE   :",
+    signal_date
+)
+
+print(
+    "PRICE VALID   :",
+    archive["signal_price"]
+    .notna()
+    .sum()
+)
+
+print(
+    "OUTPUT        :",
+    OUTPUT_FILE
 )
 
 print()
 
 print(
-    result[
+    archive[
         [
             "ticker",
+            "signal_price",
             "decision_score",
             "decision",
-            "market_score",
             "market_regime",
         ]
-    ]
-    .to_string(
+    ].to_string(
         index=False
     )
 )
 
 print()
-
-print(
-    "STEP 13 OUTPUT : OK"
-)
+print("STEP 13 OUTPUT : OK")
