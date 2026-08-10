@@ -1,36 +1,32 @@
+```yaml
 name: STEP 1-12 - Full Option Scanner Pipeline
 
 on:
   workflow_dispatch:
 
   # ============================================================
-  # TEST COMPLETE AFTER VALIDATION
-  #
-  # 미국장 종료 후 KST 06:00 실행
+  # 미국장 종료 후 KST 06:00 자동 실행
   # UTC 21:00 = KST 06:00
   #
-  # 정상 검증 후 주석 제거
+  # 검증 완료 후 자동 실행을 활성화하려면
+  # 아래 schedule 주석을 제거하세요.
   # ============================================================
-  #
+
   # schedule:
   #   - cron: "0 21 * * 1-5"
-
 
 permissions:
   contents: write
 
-
 concurrency:
   group: option-scanner-step1-12
   cancel-in-progress: false
-
 
 jobs:
 
   full-pipeline:
 
     runs-on: ubuntu-latest
-
 
     steps:
 
@@ -102,11 +98,12 @@ jobs:
 
 
       # ============================================================
-      # 5. CLEAN OLD TEMPORARY INPUTS
+      # 5. CLEAN PREVIOUS TEMPORARY DATA
       #
-      # IMPORTANT
+      # IMPORTANT:
+      # Every execution starts from fresh market/options data.
       #
-      # Every run starts with fresh data.
+      # Historical result files are NOT deleted here.
       # ============================================================
 
       - name: Clean Previous Run Temporary Files
@@ -127,7 +124,8 @@ jobs:
           rm -f data/analysis/market_regime.csv
           rm -f data/analysis/market_regime_detail.csv
 
-          echo "OLD TEMPORARY DATA : REMOVED"
+          echo ""
+          echo "TEMPORARY DATA : CLEAN"
 
 
       # ============================================================
@@ -207,6 +205,7 @@ jobs:
               df["ticker"]
               .astype(str)
               .str.upper()
+              .str.strip()
           )
 
           missing_tickers = expected - actual
@@ -228,30 +227,11 @@ jobs:
       # ============================================================
       # 8. MARKET REGIME ADAPTER
       #
-      # IMPORTANT
+      # Preserve the original STEP 1 result in:
       #
-      # 01_market_regime.py currently produces:
+      # market_regime_detail.csv
       #
-      # NDX
-      # SPY
-      # SOXX
-      # DIA
-      #
-      # as separate rows.
-      #
-      # STEP 9 / STEP 12 expect:
-      #
-      # one row containing:
-      #
-      # ndx_direction
-      # spy_direction
-      # soxx_direction
-      # dia_direction
-      #
-      # Therefore:
-      #
-      # 1. Preserve original output
-      # 2. Create the format consumed by STEP 9 / 12
+      # Then create the one-row format consumed by STEP 9/12.
       # ============================================================
 
       - name: Adapt Market Regime For Decision Engine
@@ -277,7 +257,7 @@ jobs:
 
           df = pd.read_csv(source)
 
-          # Preserve original STEP 1 result
+          # Preserve original STEP 1 output
           df.to_csv(
               detail,
               index=False
@@ -291,6 +271,7 @@ jobs:
           )
 
           def get_direction(ticker):
+
               rows = df[
                   df["ticker"] == ticker
               ]
@@ -301,9 +282,6 @@ jobs:
               return str(
                   rows.iloc[-1]["direction"]
               ).strip().upper()
-
-          # Market score/regime are identical
-          # across the four rows.
 
           market_score = float(
               df.iloc[-1]["market_score"]
@@ -354,11 +332,15 @@ jobs:
           )
 
           print()
-          print("STEP 1 DETAIL SAVED:")
-          print(detail)
+          print("ORIGINAL MARKET DATA:")
+          print(
+              df.to_string(
+                  index=False
+              )
+          )
 
           print()
-          print("STEP 1 DECISION FORMAT:")
+          print("DECISION MARKET DATA:")
           print(
               output.to_string(
                   index=False
@@ -484,6 +466,8 @@ jobs:
           echo "🔥 STEP 3 - NORMALIZER"
           echo "=========================================="
 
+          test -f data/raw/options_raw.csv
+
           python src/03_normalizer.py
 
 
@@ -536,6 +520,8 @@ jobs:
           echo "🔥 STEP 4 - GREEKS"
           echo "=========================================="
 
+          test -f data/normalized/options_normalized.csv
+
           python src/04_greeks.py
 
 
@@ -570,6 +556,7 @@ jobs:
               )
 
           if "DTE" in df.columns:
+
               print(
                   "DTE MIN    :",
                   df["DTE"].min()
@@ -587,6 +574,7 @@ jobs:
           ]:
 
               if column in df.columns:
+
                   print(
                       f"VALID {column.upper():<5}:",
                       df[column].notna().sum()
@@ -614,6 +602,8 @@ jobs:
           echo "=========================================="
           echo "🔥 STEP 5 - UNUSUAL FLOW"
           echo "=========================================="
+
+          test -f data/analysis/options_greeks.csv
 
           python src/05_unusual_flow.py
 
@@ -643,18 +633,21 @@ jobs:
           print("COLUMNS :", len(df.columns))
 
           if "symbol" in df.columns:
+
               print(
                   "TICKERS :",
                   df["symbol"].nunique()
               )
 
           if "flow_score" in df.columns:
+
               print(
                   "FLOW SCORE VALID :",
                   df["flow_score"].notna().sum()
               )
 
           if df.empty:
+
               raise RuntimeError(
                   "unusual_flow.csv is empty"
               )
@@ -676,6 +669,8 @@ jobs:
           echo "=========================================="
           echo "🔥 STEP 6 - TOP 20"
           echo "=========================================="
+
+          test -f data/analysis/unusual_flow.csv
 
           python src/06_top20.py
 
@@ -714,9 +709,18 @@ jobs:
           )
 
           if len(df) != 20:
+
               raise RuntimeError(
                   f"TOP20 rows invalid: {len(df)}"
               )
+
+          if "symbol" in df.columns:
+
+              if df["symbol"].nunique() != 20:
+
+                  raise RuntimeError(
+                      "TOP20 contains duplicate symbols"
+                  )
 
           print()
           print(
@@ -776,12 +780,14 @@ jobs:
           )
 
           if "symbol" in df.columns:
+
               print(
                   "TICKERS :",
                   df["symbol"].nunique()
               )
 
           if df.empty:
+
               raise RuntimeError(
                   "option_search.csv is empty"
               )
@@ -838,12 +844,14 @@ jobs:
           )
 
           if "ticker" in df.columns:
+
               print(
                   "TICKERS :",
                   df["ticker"].nunique()
               )
 
           if df.empty:
+
               raise RuntimeError(
                   "structure.csv is empty"
               )
@@ -854,22 +862,7 @@ jobs:
 
 
       # ============================================================
-      # 24. STEP 9 - DECISION
-      #
-      # IMPORTANT:
-      #
-      # NOW STEP 9 receives:
-      #
-      # TODAY'S MARKET
-      # +
-      # TODAY'S FLOW
-      # +
-      # TODAY'S TOP20
-      # +
-      # TODAY'S STRUCTURE
-      #
-      # Therefore final decision can use
-      # today's Market Risk.
+      # 24. STEP 9 - DECISION INPUT CHECK
       # ============================================================
 
       - name: Verify STEP 9 Inputs
@@ -886,8 +879,13 @@ jobs:
           test -f data/analysis/unusual_flow.csv
           test -f data/analysis/top20.csv
 
+          echo ""
           echo "STEP 9 INPUTS : OK"
 
+
+      # ============================================================
+      # 25. STEP 9 - DECISION
+      # ============================================================
 
       - name: Run STEP 9 Decision
         run: |
@@ -902,7 +900,7 @@ jobs:
 
 
       # ============================================================
-      # 25. STEP 9 VALIDATION
+      # 26. STEP 9 VALIDATION
       # ============================================================
 
       - name: Validate STEP 9 Decision
@@ -946,17 +944,20 @@ jobs:
           ]
 
           if missing:
+
               raise RuntimeError(
                   "Missing columns: "
                   + ", ".join(missing)
               )
 
           if df.empty:
+
               raise RuntimeError(
                   "decision.csv is empty"
               )
 
           if df["decision_score"].isna().any():
+
               raise RuntimeError(
                   "decision_score contains NaN"
               )
@@ -966,6 +967,7 @@ jobs:
               |
               (df["decision_score"] > 100)
           ).any():
+
               raise RuntimeError(
                   "decision_score outside 0-100"
               )
@@ -986,12 +988,14 @@ jobs:
           )
 
           if invalid:
+
               raise RuntimeError(
                   "Invalid decisions: "
                   + str(invalid)
               )
 
           if df["ticker"].duplicated().any():
+
               raise RuntimeError(
                   "Duplicate ticker detected"
               )
@@ -1013,7 +1017,7 @@ jobs:
 
 
       # ============================================================
-      # 26. STEP 10 - FINAL REPORT
+      # 27. STEP 10 - FINAL REPORT
       # ============================================================
 
       - name: Run STEP 10 Final Report
@@ -1031,7 +1035,7 @@ jobs:
 
 
       # ============================================================
-      # 27. STEP 10 VALIDATION
+      # 28. STEP 10 VALIDATION
       # ============================================================
 
       - name: Validate STEP 10 Final Report
@@ -1068,12 +1072,14 @@ jobs:
           ]
 
           if missing:
+
               raise RuntimeError(
                   "Missing final report columns: "
                   + ", ".join(missing)
               )
 
           if df.empty:
+
               raise RuntimeError(
                   "final_report.csv is empty"
               )
@@ -1095,6 +1101,7 @@ jobs:
           )
 
           if invalid:
+
               raise RuntimeError(
                   "Unexpected decision labels: "
                   + ", ".join(
@@ -1109,7 +1116,8 @@ jobs:
               df["decision"]
               .value_counts(
                   dropna=False
-              ).to_string()
+              )
+              .to_string()
           )
 
           print()
@@ -1118,7 +1126,7 @@ jobs:
 
 
       # ============================================================
-      # 28. STEP 11 - SPECIAL LIST
+      # 29. STEP 11 - SPECIAL LIST
       # ============================================================
 
       - name: Run STEP 11 Special List
@@ -1136,7 +1144,7 @@ jobs:
 
 
       # ============================================================
-      # 29. STEP 11 VALIDATION
+      # 30. STEP 11 VALIDATION
       # ============================================================
 
       - name: Validate STEP 11 Special List
@@ -1163,6 +1171,7 @@ jobs:
           )
 
           if "ticker" in df.columns:
+
               print(
                   "TICKERS :",
                   df["ticker"].nunique()
@@ -1174,7 +1183,7 @@ jobs:
 
 
       # ============================================================
-      # 30. STEP 12 INPUT CHECK
+      # 31. STEP 12 INPUT CHECK
       #
       # NOTHING LARGE IS DELETED YET.
       # ============================================================
@@ -1205,11 +1214,12 @@ jobs:
 
           done
 
+          echo ""
           echo "ALL STEP 12 INPUTS : OK"
 
 
       # ============================================================
-      # 31. STEP 12 - TELEGRAM
+      # 32. STEP 12 - TELEGRAM
       # ============================================================
 
       - name: Run STEP 12 Telegram Reporter
@@ -1231,7 +1241,7 @@ jobs:
 
 
       # ============================================================
-      # 32. TELEGRAM COMPLETE
+      # 33. TELEGRAM COMPLETE
       # ============================================================
 
       - name: STEP 12 Completion Check
@@ -1243,11 +1253,38 @@ jobs:
 
 
       # ============================================================
-      # 33. SAVE SMALL RESULTS
+      # 34. SHOW GIT STATE BEFORE COMMIT
       #
-      # These are useful historical/result files.
+      # IMPORTANT:
+      # Helps identify unexpected files before Git operations.
+      # ============================================================
+
+      - name: Inspect Git State
+        run: |
+
+          set -e
+
+          echo "=========================================="
+          echo "GIT STATE BEFORE COMMIT"
+          echo "=========================================="
+
+          git status --short
+
+          echo ""
+          echo "GIT BRANCH:"
+          git branch --show-current
+
+          echo ""
+          echo "GIT STATUS:"
+          git status
+
+
+      # ============================================================
+      # 35. SAVE ANALYSIS RESULTS
       #
-      # Large raw analysis files are NOT committed.
+      # Historical / useful result files are committed.
+      #
+      # Large temporary option datasets are NOT committed.
       # ============================================================
 
       - name: Commit Analysis Results
@@ -1276,8 +1313,13 @@ jobs:
             data/analysis/special_list.csv \
             data/analysis/special_list.md
 
+          echo ""
+          echo "STAGED FILES:"
+          git diff --cached --name-status
+
           if git diff --cached --quiet; then
 
+            echo ""
             echo "NO RESULT CHANGES"
 
           else
@@ -1285,33 +1327,47 @@ jobs:
             git commit \
               -m "Update option scanner results [skip ci]"
 
+            echo ""
             echo "RESULTS COMMITTED"
 
           fi
 
 
       # ============================================================
-      # 34. SYNC MAIN
+      # 36. SHOW GIT STATE AFTER COMMIT
       # ============================================================
 
-      - name: Sync with Remote Main
+      - name: Verify Git State After Commit
         run: |
 
           set -e
 
           echo "=========================================="
-          echo "SYNC WITH REMOTE MAIN"
+          echo "GIT STATE AFTER COMMIT"
           echo "=========================================="
 
-          git fetch origin main
+          git status --short
 
-          git rebase origin/main
-
-          echo "REBASE : OK"
+          echo ""
+          git log -1 --oneline
 
 
       # ============================================================
-      # 35. PUSH
+      # 37. PUSH RESULTS
+      #
+      # IMPORTANT:
+      #
+      # The previous workflow used:
+      #
+      # git fetch origin main
+      # git rebase origin/main
+      #
+      # That caused:
+      #
+      # error: cannot rebase:
+      # You have unstaged changes.
+      #
+      # We now use --autostash.
       # ============================================================
 
       - name: Push Results
@@ -1319,20 +1375,39 @@ jobs:
 
           set -e
 
+          echo "=========================================="
+          echo "PUSH RESULTS"
+          echo "=========================================="
+
+          echo ""
+          echo "REMOTE MAIN:"
+          git ls-remote --heads origin main
+
+          echo ""
+          echo "LOCAL STATUS BEFORE PUSH:"
+          git status --short
+
+          # Bring the local branch up to date.
+          # --autostash protects any unexpected working-tree changes.
+          git pull --rebase --autostash origin main
+
+          echo ""
+          echo "LOCAL STATUS AFTER REBASE:"
+          git status --short
+
           git push origin HEAD:main
 
+          echo ""
           echo "PUSH : OK"
 
 
       # ============================================================
-      # 36. FINAL CLEANUP
+      # 38. FINAL CLEANUP
       #
-      # ONLY AFTER:
+      # These files are needed during STEP 1-12,
+      # but are not historical result files.
       #
-      # STEP 12
-      # COMMIT
-      # PUSH
-      #
+      # Cleanup occurs ONLY AFTER Telegram + Commit + Push.
       # ============================================================
 
       - name: Cleanup Temporary Analysis Files
@@ -1352,6 +1427,7 @@ jobs:
 
           rm -f data/analysis/unusual_flow.csv
 
+          echo ""
           echo "RAW OPTIONS       : REMOVED"
           echo "NORMALIZED OPTIONS: REMOVED"
           echo "GREEKS             : REMOVED"
@@ -1359,7 +1435,7 @@ jobs:
 
 
       # ============================================================
-      # 37. FINAL CLEANUP VALIDATION
+      # 39. FINAL CLEANUP VALIDATION
       # ============================================================
 
       - name: Verify Cleanup
@@ -1376,6 +1452,7 @@ jobs:
 
             if [ -f "$file" ]; then
 
+              echo ""
               echo "ERROR: Temporary file still exists:"
               echo "$file"
 
@@ -1385,11 +1462,12 @@ jobs:
 
           done
 
+          echo ""
           echo "TEMPORARY FILE CLEANUP : OK"
 
 
       # ============================================================
-      # 38. COMPLETE
+      # 40. COMPLETE
       # ============================================================
 
       - name: STEP 1-12 Complete
@@ -1412,7 +1490,13 @@ jobs:
           echo "STEP 10 : Final Report         SAVED"
           echo "STEP 11 : Special List         SAVED"
           echo "STEP 12 : Telegram             SENT"
+
           echo ""
           echo "MARKET DATA : NDX / SPY / SOXX / DIA"
+
+          echo ""
+          echo "GIT SYNC : STABLE"
+
           echo ""
           echo "FINAL STATUS : SUCCESS"
+```
