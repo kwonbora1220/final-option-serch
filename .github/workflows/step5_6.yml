@@ -3,6 +3,9 @@ name: STEP 5-12 - Full Option Scanner Pipeline
 on:
   workflow_dispatch:
 
+  schedule:
+    - cron: "0 21 * * 1-5"
+
 permissions:
   contents: write
 
