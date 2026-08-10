@@ -1,49 +1,25 @@
-
 name: STEP 13-16 - Accuracy & Reliability Validation
 
 on:
-
   workflow_dispatch:
-
-  # ============================================================
-  # STEP 1-12 완료 후 자동 실행
-  #
-  # STEP 1-12가 오전 06:00 KST에 실행되므로
-  # 1-12가 성공적으로 끝나면 이 workflow가 이어서 실행된다.
-  #
-  # 독립 schedule을 사용하지 않아
-  # 1-12와 동시에 실행되는 문제를 방지한다.
-  # ============================================================
 
   workflow_run:
     workflows:
       - "STEP 1-12 - Full Option Scanner Pipeline"
-
     types:
       - completed
-
     branches:
       - main
 
-
 permissions:
   contents: write
-
 
 concurrency:
   group: option-scanner-accuracy
   cancel-in-progress: false
 
-
 jobs:
-
   accuracy-validation:
-
-    # ============================================================
-    # workflow_run은 1-12가 실패했을 때도 호출될 수 있다.
-    #
-    # 반드시 1-12가 SUCCESS인 경우에만 실행한다.
-    # ============================================================
 
     if: >
       github.event_name == 'workflow_dispatch'
@@ -56,776 +32,331 @@ jobs:
 
     runs-on: ubuntu-latest
 
-
     steps:
-
-      # ============================================================
-      # 1. CHECKOUT
-      # ============================================================
 
       - name: Checkout repository
         uses: actions/checkout@v4
-
         with:
           fetch-depth: 0
           persist-credentials: true
 
-
-      # ============================================================
-      # 2. PYTHON
-      # ============================================================
-
       - name: Setup Python
         uses: actions/setup-python@v5
-
         with:
           python-version: "3.12"
 
-
-      # ============================================================
-      # 3. DEPENDENCIES
-      # ============================================================
-
       - name: Install dependencies
         run: |
-
           set -e
-
           python -m pip install --upgrade pip
-
           pip install -r requirements.txt
 
-
       # ============================================================
-      # 4. SOURCE CHECK
+      # SOURCE CHECK
       # ============================================================
 
-      - name: Check Accuracy Source Files
+      - name: Check STEP 13-16 Source Files
         run: |
-
           set -e
 
-          echo "=========================================="
-          echo "STEP 13-16 SOURCE CHECK"
-          echo "=========================================="
-
           test -f src/13_prediction_archive.py
-
           test -f src/14_performance_tracker.py
-
           test -f src/15_accuracy_report.py
-
           test -f src/16_reliability_report.py
 
           test -f data/analysis/decision.csv
-
           test -f data/analysis/structure.csv
-
           test -f data/analysis/market_regime.csv
-
           test -f data/analysis/top20.csv
 
-          echo ""
           echo "STEP 13 SOURCE : OK"
           echo "STEP 14 SOURCE : OK"
           echo "STEP 15 SOURCE : OK"
           echo "STEP 16 SOURCE : OK"
-          echo ""
-          echo "ALL REQUIRED SOURCE FILES : OK"
-
 
       # ============================================================
-      # 5. PYTHON SYNTAX CHECK
+      # PYTHON CHECK
       # ============================================================
 
       - name: Python Syntax Check
         run: |
-
           set -e
 
-          echo "=========================================="
-          echo "PYTHON SYNTAX CHECK"
-          echo "=========================================="
+          python -m py_compile src/13_prediction_archive.py
+          python -m py_compile src/14_performance_tracker.py
+          python -m py_compile src/15_accuracy_report.py
+          python -m py_compile src/16_reliability_report.py
 
-          python -m py_compile \
-            src/13_prediction_archive.py
-
-          python -m py_compile \
-            src/14_performance_tracker.py
-
-          python -m py_compile \
-            src/15_accuracy_report.py
-
-          python -m py_compile \
-            src/16_reliability_report.py
-
-          echo ""
           echo "PYTHON SYNTAX : OK"
 
-
       # ============================================================
-      # 6. STEP 13
+      # STEP 13
       # ============================================================
 
       - name: Run STEP 13 Prediction Archive
         run: |
-
           set -e
-
-          echo "=========================================="
-          echo "🔥 STEP 13 - PREDICTION ARCHIVE"
-          echo "=========================================="
-
           python src/13_prediction_archive.py
-
-
-      # ============================================================
-      # 7. STEP 13 VALIDATION
-      # ============================================================
 
       - name: Validate STEP 13
         run: |
-
           set -e
 
-          echo "=========================================="
-          echo "STEP 13 OUTPUT CHECK"
-          echo "=========================================="
-
-          test -f \
-            data/analysis/prediction_history.csv
+          test -f data/analysis/prediction_history.csv
 
           python - <<'PY'
-
           import pandas as pd
 
-          file = \
-              "data/analysis/prediction_history.csv"
-
+          file = "data/analysis/prediction_history.csv"
           df = pd.read_csv(file)
 
-          print("ROWS   :", len(df))
-
-          if "ticker" in df.columns:
-
-              print(
-                  "TICKERS:",
-                  df["ticker"].nunique()
-              )
-
-          if "signal_price" in df.columns:
-
-              print(
-                  "PRICE  :",
-                  df["signal_price"].notna().sum()
-              )
-
-              if df["signal_price"].isna().any():
-
-                  raise RuntimeError(
-                      "signal_price contains NaN"
-                  )
-
           if df.empty:
+              raise RuntimeError("prediction_history.csv is empty")
 
+          required = [
+              "signal_date",
+              "ticker",
+              "decision",
+              "signal_price",
+          ]
+
+          missing = [
+              c for c in required
+              if c not in df.columns
+          ]
+
+          if missing:
               raise RuntimeError(
-                  "prediction_history.csv empty"
+                  "STEP 13 missing columns: "
+                  + ", ".join(missing)
               )
 
-          print()
-          print("STEP 13 OUTPUT : OK")
+          if df["signal_price"].isna().any():
+              raise RuntimeError(
+                  "STEP 13 signal_price contains NaN"
+              )
 
+          print("ROWS :", len(df))
+          print("TICKERS :", df["ticker"].nunique())
+          print("STEP 13 OUTPUT : OK")
           PY
 
-
       # ============================================================
-      # 8. STEP 14
-      #
-      # D1
-      # D3
-      # D5
-      # MFE
-      # MAE
+      # STEP 14
       # ============================================================
 
       - name: Run STEP 14 Performance Tracker
         run: |
-
           set -e
-
-          echo "=========================================="
-          echo "🔥 STEP 14 - PERFORMANCE TRACKER"
-          echo "=========================================="
-
           python src/14_performance_tracker.py
-
-
-      # ============================================================
-      # 9. STEP 14 VALIDATION
-      # ============================================================
 
       - name: Validate STEP 14
         run: |
-
           set -e
 
-          echo "=========================================="
-          echo "STEP 14 OUTPUT CHECK"
-          echo "=========================================="
-
-          test -f \
-            data/analysis/performance_history.csv
+          test -f data/analysis/performance_history.csv
 
           python - <<'PY'
-
           import pandas as pd
 
-          file = \
-              "data/analysis/performance_history.csv"
-
+          file = "data/analysis/performance_history.csv"
           df = pd.read_csv(file)
 
-          print(
-              "ROWS :",
-              len(df)
-          )
+          if df.empty:
+              raise RuntimeError(
+                  "performance_history.csv is empty"
+              )
 
-          required_core = [
+          required = [
               "ticker",
               "decision",
-          ]
-
-          for column in required_core:
-
-              if column not in df.columns:
-
-                  raise RuntimeError(
-                      f"Missing required column: {column}"
-                  )
-
-          print()
-
-          for column in [
               "d1_return",
               "d3_return",
               "d5_return",
               "d5_mfe",
               "d5_mae",
-          ]:
+          ]
 
-              if column in df.columns:
+          missing = [
+              c for c in required
+              if c not in df.columns
+          ]
 
-                  print(
-                      column.upper(),
-                      ":",
-                      df[column].notna().sum()
-                  )
-
-          if df.empty:
-
+          if missing:
               raise RuntimeError(
-                  "performance_history.csv empty"
+                  "STEP 14 missing columns: "
+                  + ", ".join(missing)
               )
 
-          print()
-          print("STEP 14 OUTPUT : OK")
+          print("ROWS :", len(df))
+          print("D1 COMPLETE :", df["d1_return"].notna().sum())
+          print("D3 COMPLETE :", df["d3_return"].notna().sum())
+          print("D5 COMPLETE :", df["d5_return"].notna().sum())
+          print("MFE COMPLETE:", df["d5_mfe"].notna().sum())
+          print("MAE COMPLETE:", df["d5_mae"].notna().sum())
 
+          print("STEP 14 OUTPUT : OK")
           PY
 
-
       # ============================================================
-      # 10. STEP 15
+      # STEP 15
       # ============================================================
 
       - name: Run STEP 15 Accuracy Report
         run: |
-
           set -e
-
-          echo "=========================================="
-          echo "🔥 STEP 15 - ACCURACY REPORT"
-          echo "=========================================="
-
           python src/15_accuracy_report.py
-
-
-      # ============================================================
-      # 11. STEP 15 VALIDATION
-      # ============================================================
 
       - name: Validate STEP 15
         run: |
-
           set -e
 
-          echo "=========================================="
-          echo "STEP 15 OUTPUT CHECK"
-          echo "=========================================="
-
-          test -f \
-            data/analysis/accuracy_report.csv
+          test -f data/analysis/accuracy_report.csv
 
           python - <<'PY'
-
           import pandas as pd
 
-          file = \
-              "data/analysis/accuracy_report.csv"
-
+          file = "data/analysis/accuracy_report.csv"
           df = pd.read_csv(file)
 
-          print(
-              "REPORT ROWS :",
-              len(df)
-          )
-
-          print()
-
-          print(
-              df.to_string(
-                  index=False
-              )
-          )
-
           if df.empty:
-
               raise RuntimeError(
-                  "accuracy_report.csv empty"
+                  "accuracy_report.csv is empty"
               )
 
+          required = [
+              "category",
+              "group",
+              "signals",
+          ]
+
+          missing = [
+              c for c in required
+              if c not in df.columns
+          ]
+
+          if missing:
+              raise RuntimeError(
+                  "STEP 15 missing columns: "
+                  + ", ".join(missing)
+              )
+
+          print("REPORT ROWS :", len(df))
+          print()
+          print(df.to_string(index=False))
           print()
           print("STEP 15 OUTPUT : OK")
-
           PY
 
-
       # ============================================================
-      # 12. STEP 16
-      #
-      # 실제 사용하는 파일:
-      #
-      # src/16_reliability_report.py
-      #
-      # 16_confidence_report.py는 사용하지 않는다.
+      # STEP 16
       # ============================================================
 
       - name: Run STEP 16 Reliability Report
         run: |
-
           set -e
 
-          echo "=========================================="
-          echo "🔥 STEP 16 - RELIABILITY REPORT"
-          echo "=========================================="
-
-          test -f \
-            data/analysis/prediction_history.csv
-
-          test -f \
-            data/analysis/performance_history.csv
-
-          test -f \
-            data/analysis/accuracy_report.csv
+          test -f data/analysis/prediction_history.csv
+          test -f data/analysis/performance_history.csv
+          test -f data/analysis/accuracy_report.csv
 
           python src/16_reliability_report.py
 
-
-      # ============================================================
-      # 13. STEP 16 VALIDATION
-      # ============================================================
-
-      - name: Validate STEP 16 Reliability
+      - name: Validate STEP 16
         run: |
-
           set -e
 
-          echo "=========================================="
-          echo "STEP 16 OUTPUT CHECK"
-          echo "=========================================="
-
-          test -f \
-            data/analysis/reliability_report.csv
-
-          test -f \
-            data/analysis/reliability_report.md
+          test -f data/analysis/reliability_report.csv
+          test -f data/analysis/reliability_report.md
 
           python - <<'PY'
-
           import pandas as pd
           from pathlib import Path
 
-          csv_file = \
-              "data/analysis/reliability_report.csv"
-
-          md_file = \
-              "data/analysis/reliability_report.md"
+          csv_file = "data/analysis/reliability_report.csv"
+          md_file = "data/analysis/reliability_report.md"
 
           df = pd.read_csv(csv_file)
 
-          print()
-          print("==========================================")
-          print("🔥 RELIABILITY REPORT")
-          print("==========================================")
-
-          print()
-          print(
-              "ROWS :",
-              len(df)
-          )
-
-          print()
-
-          print(
-              df.to_string(
-                  index=False
-              )
-          )
-
           if df.empty:
-
               raise RuntimeError(
-                  "reliability_report.csv empty"
+                  "reliability_report.csv is empty"
               )
 
           if not Path(md_file).exists():
-
               raise RuntimeError(
-                  "reliability_report.md missing"
+                  "reliability_report.md is missing"
               )
 
+          print()
+          print("=" * 70)
+          print("🔥 STEP 16 RELIABILITY RESULT")
+          print("=" * 70)
+          print()
+          print(df.to_string(index=False))
           print()
           print("RELIABILITY CSV : OK")
           print("RELIABILITY MD  : OK")
-
-          print()
-          print("STEP 16 OUTPUT : OK")
-
+          print("STEP 16 OUTPUT  : OK")
           PY
 
-
       # ============================================================
-      # 14. DISPLAY RELIABILITY SUMMARY
-      #
-      # GitHub Actions에서도 확인 가능
-      # ============================================================
-
-      - name: Display Reliability Summary
-        run: |
-
-          set -e
-
-          python - <<'PY'
-
-          import pandas as pd
-          from pathlib import Path
-
-          print()
-          print("==========================================")
-          print("🔥 OPTION SCANNER RELIABILITY SUMMARY")
-          print("==========================================")
-
-          files = {
-
-              "Prediction History":
-                  "data/analysis/prediction_history.csv",
-
-              "Performance History":
-                  "data/analysis/performance_history.csv",
-
-              "Accuracy Report":
-                  "data/analysis/accuracy_report.csv",
-
-              "Reliability Report":
-                  "data/analysis/reliability_report.csv",
-
-          }
-
-          for name, path in files.items():
-
-              p = Path(path)
-
-              if not p.exists():
-
-                  print(
-                      f"{name:<24}: MISSING"
-                  )
-
-                  continue
-
-              try:
-
-                  df = pd.read_csv(path)
-
-                  print(
-                      f"{name:<24}: "
-                      f"{len(df)} rows"
-                  )
-
-              except Exception as e:
-
-                  print(
-                      f"{name:<24}: "
-                      f"READ ERROR - {e}"
-                  )
-
-
-          reliability = pd.read_csv(
-              "data/analysis/reliability_report.csv"
-          )
-
-          print()
-          print("==========================================")
-          print("📊 RELIABILITY RESULT")
-          print("==========================================")
-
-          print()
-
-          print(
-              reliability.to_string(
-                  index=False
-              )
-          )
-
-
-          print()
-          print("==========================================")
-          print("📈 IMPORTANT RELIABILITY METRICS")
-          print("==========================================")
-
-          metric_column = None
-          value_column = None
-
-          if "metric" in reliability.columns:
-
-              metric_column = "metric"
-
-          if "value" in reliability.columns:
-
-              value_column = "value"
-
-
-          if (
-              metric_column is not None
-              and value_column is not None
-          ):
-
-              important = [
-
-                  "total_signals",
-
-                  "d5_completed",
-
-                  "d5_hit_rate",
-
-                  "d5_avg_return",
-
-                  "d5_avg_mfe",
-
-                  "d5_avg_mae",
-
-                  "recent_50_count",
-
-                  "recent_50_hit_rate",
-
-                  "recent_50_avg_return",
-
-              ]
-
-              for metric in important:
-
-                  rows = reliability[
-                      reliability[metric_column]
-                      .astype(str)
-                      == metric
-                  ]
-
-                  if not rows.empty:
-
-                      print(
-                          f"{metric:<24}:",
-                          rows.iloc[0][value_column]
-                      )
-
-
-          print()
-          print("==========================================")
-          print("🔥 RELIABILITY DATA IS ACCUMULATING")
-          print("==========================================")
-
-          PY
-
-
-      # ============================================================
-      # 15. TELEGRAM RELIABILITY REPORT
-      #
-      # ★ 추가된 핵심 기능
-      #
-      # STEP 16 결과를 매일 Telegram으로 전송
-      #
-      # TELEGRAM_BOT_TOKEN
-      # TELEGRAM_CHAT_ID
-      #
-      # 기존 STEP 12와 동일한 Secrets 사용
+      # TELEGRAM
       # ============================================================
 
       - name: Send Reliability Report to Telegram
         env:
-
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
         run: |
-
           set -e
 
-          echo "=========================================="
-          echo "📨 SEND RELIABILITY REPORT TO TELEGRAM"
-          echo "=========================================="
-
-
           if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
-
             echo "ERROR: TELEGRAM_BOT_TOKEN is missing"
-
             exit 1
-
           fi
-
 
           if [ -z "$TELEGRAM_CHAT_ID" ]; then
-
             echo "ERROR: TELEGRAM_CHAT_ID is missing"
-
             exit 1
-
           fi
 
-
           python - <<'PY'
-
           import os
           import pandas as pd
           import requests
 
+          token = os.environ["TELEGRAM_BOT_TOKEN"]
+          chat_id = os.environ["TELEGRAM_CHAT_ID"]
 
-          token = os.environ[
-              "TELEGRAM_BOT_TOKEN"
-          ]
-
-          chat_id = os.environ[
-              "TELEGRAM_CHAT_ID"
-          ]
-
-
-          file = (
-              "data/analysis/"
-              "reliability_report.csv"
-          )
-
+          file = "data/analysis/reliability_report.csv"
 
           df = pd.read_csv(file)
 
-
           metrics = {}
 
-          if (
-              "metric" in df.columns
-              and "value" in df.columns
-          ):
-
+          if "metric" in df.columns and "value" in df.columns:
               for _, row in df.iterrows():
+                  metrics[str(row["metric"])] = row["value"]
 
-                  metrics[
-                      str(row["metric"])
-                  ] = row["value"]
-
-
-          def get_metric(name, default="N/A"):
-
-              return metrics.get(
-                  name,
-                  default
-              )
-
-
-          total_signals = get_metric(
-              "total_signals"
-          )
-
-          d5_completed = get_metric(
-              "d5_completed"
-          )
-
-          d5_hit_rate = get_metric(
-              "d5_hit_rate"
-          )
-
-          d5_avg_return = get_metric(
-              "d5_avg_return"
-          )
-
-          d5_avg_mfe = get_metric(
-              "d5_avg_mfe"
-          )
-
-          d5_avg_mae = get_metric(
-              "d5_avg_mae"
-          )
-
-          recent_count = get_metric(
-              "recent_50_count"
-          )
-
-          recent_hit = get_metric(
-              "recent_50_hit_rate"
-          )
-
-          recent_return = get_metric(
-              "recent_50_avg_return"
-          )
-
-
-          # --------------------------------------------------------
-          # reliability_report.py가 생성한 전체 결과에서
-          # reliability score / status가 있을 경우 표시
-          # --------------------------------------------------------
-
-          reliability_score = get_metric(
-              "reliability_score"
-          )
-
-          reliability_status = get_metric(
-              "reliability_status"
-          )
-
-          sample_status = get_metric(
-              "sample_status"
-          )
-
+          def get(name):
+              return metrics.get(name, "N/A")
 
           def fmt(value):
-
               if value == "N/A":
-
                   return value
 
               try:
-
                   number = float(value)
 
                   if number.is_integer():
-
-                      return str(
-                          int(number)
-                      )
+                      return str(int(number))
 
                   return f"{number:.2f}"
 
               except Exception:
-
                   return str(value)
-
 
           message = f"""
 ━━━━━━━━━━━━━━━━━━━━━━
@@ -834,26 +365,26 @@ jobs:
 ━━━━━━━━━━━━━━━━━━━━━━
 
 📈 누적 검증
-• 전체 신호       : {fmt(total_signals)}
-• D5 완료         : {fmt(d5_completed)}
+• 전체 신호       : {fmt(get("total_signals"))}
+• D5 완료         : {fmt(get("d5_completed"))}
 
 🎯 D5 성과
-• 적중률          : {fmt(d5_hit_rate)}%
-• 평균 수익률     : {fmt(d5_avg_return)}%
+• 적중률          : {fmt(get("d5_hit_rate"))}%
+• 평균 수익률     : {fmt(get("d5_avg_return"))}%
 
 📊 MFE / MAE
-• 평균 MFE        : {fmt(d5_avg_mfe)}%
-• 평균 MAE        : {fmt(d5_avg_mae)}%
+• 평균 MFE        : {fmt(get("d5_avg_mfe"))}%
+• 평균 MAE        : {fmt(get("d5_avg_mae"))}%
 
 🔥 최근 50개
-• 표본            : {fmt(recent_count)}
-• 적중률          : {fmt(recent_hit)}%
-• 평균 수익률     : {fmt(recent_return)}%
+• 표본            : {fmt(get("recent_50_count"))}
+• 적중률          : {fmt(get("recent_50_hit_rate"))}%
+• 평균 수익률     : {fmt(get("recent_50_avg_return"))}%
 
 🧪 검증 상태
-• 표본 상태       : {fmt(sample_status)}
-• Reliability     : {fmt(reliability_score)}
-• 상태            : {fmt(reliability_status)}
+• 표본 상태       : {fmt(get("sample_status"))}
+• Reliability     : {fmt(get("reliability_score"))}
+• 상태            : {fmt(get("reliability_status"))}
 
 ━━━━━━━━━━━━━━━━━━━━━━
 🔥 RELIABILITY DATA
@@ -861,65 +392,36 @@ jobs:
 ━━━━━━━━━━━━━━━━━━━━━━
 """.strip()
 
-
-          url = (
-              f"https://api.telegram.org/"
-              f"bot{token}/sendMessage"
-          )
-
+          url = f"https://api.telegram.org/bot{token}/sendMessage"
 
           response = requests.post(
-
               url,
-
               data={
                   "chat_id": chat_id,
                   "text": message,
               },
-
               timeout=30,
           )
 
-
           if not response.ok:
-
-              print(
-                  "Telegram response:",
-                  response.text
-              )
-
+              print(response.text)
               raise RuntimeError(
-                  "Telegram message failed"
+                  "Telegram reliability message failed"
               )
 
-
-          print()
-          print(
-              "TELEGRAM RELIABILITY REPORT : SENT"
-          )
-
+          print("TELEGRAM RELIABILITY REPORT : SENT")
           PY
 
-
       # ============================================================
-      # 16. COMMIT ACCURACY / RELIABILITY DATA
+      # COMMIT
       # ============================================================
 
       - name: Commit Accuracy and Reliability Data
         run: |
-
           set -e
 
-          echo "=========================================="
-          echo "COMMIT ACCURACY / RELIABILITY DATA"
-          echo "=========================================="
-
-          git config user.name \
-            "github-actions[bot]"
-
-          git config user.email \
-            "41898282+github-actions[bot]@users.noreply.github.com"
-
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add \
             data/analysis/prediction_history.csv \
@@ -928,94 +430,42 @@ jobs:
             data/analysis/reliability_report.csv \
             data/analysis/reliability_report.md
 
-
           if git diff --cached --quiet; then
-
             echo "NO ACCURACY / RELIABILITY CHANGES"
-
           else
-
             git commit \
               -m "Update option scanner reliability data [skip ci]"
-
-            echo "ACCURACY / RELIABILITY DATA COMMITTED"
-
           fi
 
-
       # ============================================================
-      # 17. SYNC MAIN
-      #
-      # 다른 결과 commit이 이미 main에 들어온 경우
-      # push 충돌 방지
+      # PUSH
       # ============================================================
 
-      - name: Sync with Remote Main
+      - name: Push Reliability Results
         run: |
-
           set -e
-
-          echo "=========================================="
-          echo "SYNC WITH REMOTE MAIN"
-          echo "=========================================="
-
-          git fetch origin main
-
-          git rebase origin/main
-
-          echo "REBASE : OK"
-
-
-      # ============================================================
-      # 18. PUSH
-      # ============================================================
-
-      - name: Push Accuracy Results
-        run: |
-
-          set -e
-
-          echo "=========================================="
-          echo "PUSH ACCURACY RESULTS"
-          echo "=========================================="
 
           git push origin HEAD:main
 
-          echo "PUSH : OK"
-
+          echo "RELIABILITY RESULTS PUSHED"
 
       # ============================================================
-      # 19. COMPLETE
+      # COMPLETE
       # ============================================================
 
       - name: STEP 13-16 Complete
         run: |
-
+          echo ""
           echo "=========================================="
           echo "🔥🔥 STEP 13-16 COMPLETE"
           echo "=========================================="
-
-          echo ""
           echo "STEP 13 : Prediction Archive"
           echo "STEP 14 : Performance Tracker"
           echo "STEP 15 : Accuracy Report"
           echo "STEP 16 : Reliability Report"
-
           echo ""
-
-          echo "prediction_history.csv  : SAVED"
-          echo "performance_history.csv : SAVED"
-          echo "accuracy_report.csv     : SAVED"
-          echo "reliability_report.csv  : SAVED"
-          echo "reliability_report.md   : SAVED"
-
-          echo ""
-
-          echo "TELEGRAM RELIABILITY    : SENT"
-
-          echo ""
-
+          echo "D1 / D3 / D5 : TRACKED"
+          echo "MFE / MAE     : TRACKED"
+          echo "RELIABILITY   : ACCUMULATING"
+          echo "TELEGRAM      : SENT"
           echo "=========================================="
-          echo "🔥 RELIABILITY DATA : ACCUMULATING"
-          echo "=========================================="
-
