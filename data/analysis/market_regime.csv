@@ -1,2 +1,2 @@
-timestamp_utc,market_score,regime,ndx_direction,spy_direction,soxx_direction,dia_direction,ndx_price,spy_price,soxx_price,dia_price,divergence
-2026-08-08 17:49:17,88.23529411764706,RISK-ON,BULLISH,BULLISH,NEUTRAL,BULLISH,29722.30078125,773.260009765625,543.27001953125,539.6199951171875,NONE
+ndx_direction,spy_direction,soxx_direction,dia_direction,market_score,market_regime,divergence,data_source
+NEUTRAL,BULLISH,NEUTRAL,BULLISH,73.52941176470588,RISK-ON,nan,STEP1_ADAPTED
