@@ -1,2 +1,2 @@
 ndx_direction,spy_direction,soxx_direction,dia_direction,market_score,market_regime,divergence,data_source
-BEARISH,NEUTRAL,BEARISH,BULLISH,32.35294117647059,RISK-OFF WARNING,Traditional sectors strong / Technology weak,STEP1_ADAPTED
+NEUTRAL,BULLISH,BEARISH,BULLISH,61.76470588235294,MILD RISK-ON,Semiconductors weaker than Nasdaq,STEP1_ADAPTED
