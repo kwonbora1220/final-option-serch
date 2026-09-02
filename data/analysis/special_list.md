@@ -2,182 +2,182 @@
 
 STRUCTURES : 20
 
-## 1. MU
+## 1. QQQ
 
-- RR Score: 91.69
-- CALL BUY EST. 940.0 DTE 1
-- CALL Premium: $22,145,970
-- PUT SELL EST. 920.0 DTE 1
-- PUT Premium: $8,178,480
+- RR Score: 86.86
+- CALL BUY EST. 725.0 DTE 28
+- CALL Premium: $14,363,832
+- PUT SELL EST. 705.0 DTE 28
+- PUT Premium: $12,143,528
 - Structure: BULLISH RISK-REVERSAL
 
-## 2. QQQ
+## 2. DELL
 
-- RR Score: 85.50
-- CALL BUY EST. 710.0 DTE 1
-- CALL Premium: $9,844,588
-- PUT SELL EST. 707.0 DTE 1
-- PUT Premium: $10,510,175
+- RR Score: 85.59
+- CALL BUY EST. 500.0 DTE 2
+- CALL Premium: $31,011,960
+- PUT SELL EST. 470.0 DTE 2
+- PUT Premium: $1,916,280
 - Structure: BULLISH RISK-REVERSAL
 
-## 3. SNDK
+## 3. SPY
 
-- RR Score: 81.28
-- CALL BUY EST. 1550.0 DTE 3
-- CALL Premium: $16,217,400
-- PUT SELL EST. 1530.0 DTE 3
-- PUT Premium: $5,309,120
+- RR Score: 73.16
+- CALL BUY EST. 766.0 DTE 2
+- CALL Premium: $4,537,632
+- PUT SELL EST. 760.0 DTE 9
+- PUT Premium: $14,395,010
 - Structure: BULLISH RISK-REVERSAL
 
-## 4. SPY
+## 4. SNDK
 
-- RR Score: 80.65
-- CALL BUY EST. 765.0 DTE 1
-- CALL Premium: $5,711,850
-- PUT SELL EST. 761.0 DTE 1
-- PUT Premium: $13,959,003
+- RR Score: 69.43
+- CALL BUY EST. 1560.0 DTE 2
+- CALL Premium: $3,197,160
+- PUT SELL EST. 1550.0 DTE 2
+- PUT Premium: $7,924,840
 - Structure: BULLISH RISK-REVERSAL
 
 ## 5. AAPL
 
-- RR Score: 66.27
-- CALL BUY EST. 330.0 DTE 1
-- CALL Premium: $4,610,592
-- PUT SELL EST. 320.0 DTE 1
-- PUT Premium: $2,787,316
+- RR Score: 64.81
+- CALL BUY EST. 330.0 DTE 2
+- CALL Premium: $4,692,606
+- PUT SELL EST. 322.5 DTE 2
+- PUT Premium: $2,235,376
 - Structure: BULLISH RISK-REVERSAL
 
 ## 6. TSLA
 
-- RR Score: 65.58
-- CALL BUY EST. 367.5 DTE 3
-- CALL Premium: $1,773,999
-- PUT SELL EST. 350.0 DTE 1
-- PUT Premium: $10,378,836
+- RR Score: 63.98
+- CALL BUY EST. 357.5 DTE 9
+- CALL Premium: $1,299,600
+- PUT SELL EST. 352.5 DTE 9
+- PUT Premium: $1,397,168
 - Structure: BULLISH RISK-REVERSAL
 
-## 7. DELL
+## 7. GLD
 
-- RR Score: 64.95
-- CALL BUY EST. 450.0 DTE 3
-- CALL Premium: $6,107,420
-- PUT SELL EST. 415.0 DTE 3
-- PUT Premium: $2,834,440
+- RR Score: 62.19
+- CALL BUY EST. 405.0 DTE 2
+- CALL Premium: $765,682
+- PUT SELL EST. 400.0 DTE 2
+- PUT Premium: $833,175
 - Structure: BULLISH RISK-REVERSAL
 
-## 8. MSFT
+## 8. COST
 
-- RR Score: 64.70
-- CALL BUY EST. 505.0 DTE 1
-- CALL Premium: $1,678,098
-- PUT SELL EST. 500.0 DTE 1
-- PUT Premium: $2,559,494
+- RR Score: 60.96
+- CALL BUY EST. 935.0 DTE 2
+- CALL Premium: $380,030
+- PUT SELL EST. 920.0 DTE 2
+- PUT Premium: $324,502
 - Structure: BULLISH RISK-REVERSAL
 
-## 9. AMD
+## 9. MU
 
-- RR Score: 63.19
-- CALL BUY EST. 465.0 DTE 3
-- CALL Premium: $1,465,450
-- PUT SELL EST. 455.0 DTE 1
-- PUT Premium: $1,776,610
+- RR Score: 60.95
+- CALL BUY EST. 990.0 DTE 2
+- CALL Premium: $1,057,950
+- PUT SELL EST. 942.5 DTE 2
+- PUT Premium: $975,260
 - Structure: BULLISH RISK-REVERSAL
 
-## 10. IWM
+## 10. USO
 
-- RR Score: 61.79
-- CALL BUY EST. 292.0 DTE 1
-- CALL Premium: $396,480
-- PUT SELL EST. 290.0 DTE 2
-- PUT Premium: $380,143
+- RR Score: 60.39
+- CALL BUY EST. 143.0 DTE 2
+- CALL Premium: $118,508
+- PUT SELL EST. 139.0 DTE 2
+- PUT Premium: $108,108
 - Structure: BULLISH RISK-REVERSAL
 
-## 11. GLD
+## 11. UBER
 
-- RR Score: 61.68
-- CALL BUY EST. 400.0 DTE 1
-- CALL Premium: $192,760
-- PUT SELL EST. 396.0 DTE 1
-- PUT Premium: $204,586
+- RR Score: 60.18
+- CALL BUY EST. 78.0 DTE 2
+- CALL Premium: $1,283,163
+- PUT SELL EST. 76.0 DTE 2
+- PUT Premium: $663,502
 - Structure: BULLISH RISK-REVERSAL
 
-## 12. T
+## 12. IWM
 
-- RR Score: 61.47
-- CALL BUY EST. 26.0 DTE 10
-- CALL Premium: $113,332
-- PUT SELL EST. 26.0 DTE 10
-- PUT Premium: $96,418
+- RR Score: 59.90
+- CALL BUY EST. 297.0 DTE 8
+- CALL Premium: $60,750
+- PUT SELL EST. 293.0 DTE 7
+- PUT Premium: $59,565
 - Structure: BULLISH RISK-REVERSAL
 
-## 13. SOXL
+## 13. WFC
 
-- RR Score: 61.37
-- CALL BUY EST. 107.0 DTE 1
-- CALL Premium: $444,141
-- PUT SELL EST. 105.0 DTE 1
-- PUT Premium: $712,705
+- RR Score: 59.79
+- CALL BUY EST. 91.0 DTE 16
+- CALL Premium: $63,154
+- PUT SELL EST. 88.0 DTE 16
+- PUT Premium: $63,940
 - Structure: BULLISH RISK-REVERSAL
 
-## 14. GOOGL
+## 14. AMD
 
-- RR Score: 60.72
-- CALL BUY EST. 337.5 DTE 3
-- CALL Premium: $505,377
-- PUT SELL EST. 330.0 DTE 3
-- PUT Premium: $676,386
+- RR Score: 59.73
+- CALL BUY EST. 457.5 DTE 7
+- CALL Premium: $337,050
+- PUT SELL EST. 452.5 DTE 2
+- PUT Premium: $339,730
 - Structure: BULLISH RISK-REVERSAL
 
-## 15. TLT
+## 15. MSTR
 
-- RR Score: 60.34
-- CALL BUY EST. 82.0 DTE 1
-- CALL Premium: $33,412
-- PUT SELL EST. 81.5 DTE 1
-- PUT Premium: $37,616
+- RR Score: 59.21
+- CALL BUY EST. 124.0 DTE 2
+- CALL Premium: $547,842
+- PUT SELL EST. 120.0 DTE 2
+- PUT Premium: $1,272,384
 - Structure: BULLISH RISK-REVERSAL
 
-## 16. NEM
+## 16. ASML
 
-- RR Score: 60.28
-- CALL BUY EST. 124.0 DTE 3
-- CALL Premium: $22,796
-- PUT SELL EST. 122.0 DTE 3
-- PUT Premium: $22,162
+- RR Score: 59.01
+- CALL BUY EST. 1690.0 DTE 2
+- CALL Premium: $76,020
+- PUT SELL EST. 1665.0 DTE 2
+- PUT Premium: $65,500
 - Structure: BULLISH RISK-REVERSAL
 
-## 17. MSTR
+## 17. ORCL
 
-- RR Score: 60.16
-- CALL BUY EST. 125.0 DTE 31
-- CALL Premium: $109,675
-- PUT SELL EST. 124.0 DTE 31
-- PUT Premium: $100,650
+- RR Score: 58.93
+- CALL BUY EST. 149.0 DTE 2
+- CALL Premium: $219,252
+- PUT SELL EST. 143.0 DTE 2
+- PUT Premium: $167,821
 - Structure: BULLISH RISK-REVERSAL
 
-## 18. WDC
+## 18. SLV
 
-- RR Score: 59.30
-- CALL BUY EST. 457.5 DTE 3
-- CALL Premium: $145,270
-- PUT SELL EST. 445.0 DTE 3
-- PUT Premium: $119,900
+- RR Score: 58.84
+- CALL BUY EST. 59.5 DTE 9
+- CALL Premium: $20,955
+- PUT SELL EST. 59.0 DTE 9
+- PUT Premium: $19,596
 - Structure: BULLISH RISK-REVERSAL
 
-## 19. LITE
+## 19. MSFT
 
-- RR Score: 59.09
-- CALL BUY EST. 910.0 DTE 3
-- CALL Premium: $306,000
-- PUT SELL EST. 865.0 DTE 3
-- PUT Premium: $350,220
+- RR Score: 58.70
+- CALL BUY EST. 502.5 DTE 9
+- CALL Premium: $82,410
+- PUT SELL EST. 490.0 DTE 7
+- PUT Premium: $82,816
 - Structure: BULLISH RISK-REVERSAL
 
-## 20. SPCX
+## 20. GLW
 
-- RR Score: 58.96
-- CALL BUY EST. 144.0 DTE 24
-- CALL Premium: $124,160
-- PUT SELL EST. 141.0 DTE 24
-- PUT Premium: $174,445
+- RR Score: 58.67
+- CALL BUY EST. 145.0 DTE 2
+- CALL Premium: $23,716
+- PUT SELL EST. 144.0 DTE 2
+- PUT Premium: $31,753
 - Structure: BULLISH RISK-REVERSAL
