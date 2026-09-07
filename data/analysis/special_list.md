@@ -40,7 +40,7 @@ STRUCTURES : 20
 
 ## 5. MU
 
-- RR Score: 72.98
+- RR Score: 72.97
 - CALL BUY EST. 1050.0 DTE 4
 - CALL Premium: $15,690,850
 - PUT SELL EST. 990.0 DTE 2
@@ -49,7 +49,7 @@ STRUCTURES : 20
 
 ## 6. GLD
 
-- RR Score: 71.44
+- RR Score: 71.43
 - CALL BUY EST. 410.0 DTE 11
 - CALL Premium: $7,878,335
 - PUT SELL EST. 405.0 DTE 11
@@ -67,7 +67,7 @@ STRUCTURES : 20
 
 ## 8. DELL
 
-- RR Score: 64.86
+- RR Score: 64.85
 - CALL BUY EST. 530.0 DTE 11
 - CALL Premium: $3,075,450
 - PUT SELL EST. 520.0 DTE 11
@@ -112,7 +112,7 @@ STRUCTURES : 20
 
 ## 13. AMD
 
-- RR Score: 61.50
+- RR Score: 61.49
 - CALL BUY EST. 480.0 DTE 2
 - CALL Premium: $7,205,092
 - PUT SELL EST. 472.5 DTE 4
@@ -121,7 +121,7 @@ STRUCTURES : 20
 
 ## 14. META
 
-- RR Score: 61.02
+- RR Score: 61.01
 - CALL BUY EST. 617.5 DTE 2
 - CALL Premium: $1,915,395
 - PUT SELL EST. 610.0 DTE 11
