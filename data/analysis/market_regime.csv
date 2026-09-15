@@ -1,2 +1,2 @@
 ndx_direction,spy_direction,soxx_direction,dia_direction,market_score,market_regime,divergence,data_source
-NEUTRAL,NEUTRAL,NEUTRAL,NEUTRAL,50.0,NEUTRAL,nan,STEP1_ADAPTED
+NEUTRAL,NEUTRAL,BEARISH,BEARISH,29.411764705882355,RISK-OFF,Semiconductors weaker than Nasdaq,STEP1_ADAPTED
